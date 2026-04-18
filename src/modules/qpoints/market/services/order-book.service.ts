@@ -41,6 +41,9 @@ export interface CreateOrderResult {
 /** Minimum price step – prevent zero-spread degenerate matches */
 const MIN_STEP = 0.0001;
 
+/** Fixed exchange rate: 1 Q Point = $1.00 USD at all times. */
+export const FIXED_QP_PRICE = 1.00;
+
 @Injectable()
 export class OrderBookService {
   private readonly logger = new Logger(OrderBookService.name);
@@ -68,9 +71,11 @@ export class OrderBookService {
   async createOrder(
     userId: string,
     type: QPointOrderType,
-    price: number,
+    _price: number,
     quantity: number,
   ): Promise<CreateOrderResult> {
+    // Price is always fixed at $1.00 per Q Point.
+    const price = FIXED_QP_PRICE;
     return this.dataSource.transaction(async (manager: EntityManager) => {
       const orderMgr = manager.getRepository(QPointOrder);
       const tradeMgr = manager.getRepository(QPointTrade);
@@ -221,24 +226,14 @@ export class OrderBookService {
     };
   }
 
-  /** Market buy: match against best available sell orders immediately. */
+  /** Market buy: buy Q Points at the fixed price of $1.00. */
   async marketBuy(userId: string, quantity: number): Promise<CreateOrderResult> {
-    const book = await this.getOrderBook();
-    if (!book.sells.length) {
-      throw new BadRequestException('No sell orders available. Market buy cannot execute.');
-    }
-    const bestAsk = book.sells[0].price;
-    return this.createOrder(userId, QPointOrderType.BUY, bestAsk, quantity);
+    return this.createOrder(userId, QPointOrderType.BUY, FIXED_QP_PRICE, quantity);
   }
 
-  /** Market sell: match against best available buy orders immediately. */
+  /** Market sell: sell Q Points at the fixed price of $1.00. */
   async marketSell(userId: string, quantity: number): Promise<CreateOrderResult> {
-    const book = await this.getOrderBook();
-    if (!book.buys.length) {
-      throw new BadRequestException('No buy orders available. Market sell cannot execute.');
-    }
-    const bestBid = book.buys[0].price;
-    return this.createOrder(userId, QPointOrderType.SELL, bestBid, quantity);
+    return this.createOrder(userId, QPointOrderType.SELL, FIXED_QP_PRICE, quantity);
   }
 
   // ========================================================================

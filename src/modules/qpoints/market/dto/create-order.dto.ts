@@ -1,5 +1,5 @@
-import { IsEnum, IsNumber, IsPositive, Max, Min } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsEnum, IsNumber, IsPositive, Max, Min, IsOptional } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { QPointOrderType } from '../entities/q-point-order.entity';
 
 export class CreateOrderDto {
@@ -7,12 +7,17 @@ export class CreateOrderDto {
   @IsEnum(QPointOrderType)
   type: QPointOrderType;
 
-  @ApiProperty({ description: 'Price per Q Point in USD', example: 0.95 })
+  @ApiPropertyOptional({
+    description: 'Price per Q Point in USD. Always fixed at $1.00 – this field is ignored.',
+    example: 1.0,
+    deprecated: true,
+  })
+  @IsOptional()
   @IsNumber()
   @IsPositive()
   @Min(0.0001)
   @Max(9999)
-  price: number;
+  price?: number;
 
   @ApiProperty({ description: 'Quantity of Q Points', example: 100 })
   @IsNumber()

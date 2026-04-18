@@ -60,7 +60,7 @@ export class QPointsMarketController {
     description: 'Order created; trades array contains any immediate fills',
   })
   async createOrder(@Req() req: Request, @Body() dto: CreateOrderDto) {
-    return this.orderBook.createOrder(userId(req), dto.type, dto.price, dto.quantity);
+    return this.orderBook.createOrder(userId(req), dto.type, 1.0, dto.quantity);
   }
 
   @Delete('orders/:orderId')

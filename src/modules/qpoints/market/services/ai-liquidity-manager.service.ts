@@ -4,7 +4,7 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { QPointOrder, QPointOrderStatus, QPointOrderType } from '../entities/q-point-order.entity';
-import { OrderBookService } from './order-book.service';
+import { OrderBookService, FIXED_QP_PRICE } from './order-book.service';
 import { MarketBalanceService } from './market-balance.service';
 
 export interface AIConfig {
@@ -85,19 +85,12 @@ export class AiLiquidityManagerService {
   // =====================================================================
 
   private async _runInternal(): Promise<void> {
-    const [book, { balance: platformQP }] = await Promise.all([
-      this.orderBook.getOrderBook(),
-      this.balance.getBalance(this.cfg.participantUserId),
-    ]);
-
-    const bestBid = book.buys[0]?.price ?? null;
-    const bestAsk = book.sells[0]?.price ?? null;
-    const midpoint = bestBid && bestAsk ? (bestBid + bestAsk) / 2 : null;
+    const { balance: platformQP } = await this.balance.getBalance(this.cfg.participantUserId);
 
     const currentAiOrders = await this._getAiOpenOrders();
 
     this.logger.log(
-      `AI run: qp_balance=${platformQP}, bestBid=${bestBid}, bestAsk=${bestAsk}, openOrders=${currentAiOrders.length}`,
+      `AI run: qp_balance=${platformQP}, price=${FIXED_QP_PRICE} (fixed), openOrders=${currentAiOrders.length}`,
     );
 
     // ---- 1. Cancel stale orders ----------------------------------------
@@ -112,47 +105,21 @@ export class AiLiquidityManagerService {
 
     // ---- 2. Inventory management ----------------------------------------
     if (platformQP < this.cfg.minInventory) {
-      // Need to buy more QP
-      const price = bestBid != null ? bestBid + 0.01 : 0.99;
+      // Need to buy more QP at the fixed price
       const qty = this._calcQty(platformQP, 'buy');
       if (qty > 0) {
-        await this._placeOrder(QPointOrderType.BUY, price, qty);
+        await this._placeOrder(QPointOrderType.BUY, FIXED_QP_PRICE, qty);
       }
     } else if (platformQP > this.cfg.maxInventory) {
-      // Need to sell excess QP
-      const price = bestAsk != null ? bestAsk - 0.01 : 1.01;
+      // Need to sell excess QP at the fixed price
       const qty = this._calcQty(platformQP, 'sell');
       if (qty > 0) {
-        await this._placeOrder(QPointOrderType.SELL, price, qty);
+        await this._placeOrder(QPointOrderType.SELL, FIXED_QP_PRICE, qty);
       }
     }
 
     // ---- 3. Spread tightening -------------------------------------------
-    // Refresh active orders count
-    const afterInventory = await this._getAiOpenOrders();
-    if (afterInventory.length >= this.cfg.maxOpenOrders) return;
-
-    if (midpoint && bestBid != null && bestAsk != null) {
-      const spreadPct = ((bestAsk - bestBid) / midpoint) * 100;
-
-      if (spreadPct > this.cfg.targetSpreadPct) {
-        const halfSpread = (bestAsk - bestBid) / 2;
-
-        const buyPrice = parseFloat((bestBid + halfSpread / 2).toFixed(4));
-        const sellPrice = parseFloat((bestAsk - halfSpread / 2).toFixed(4));
-
-        // Place tightening bid (if not crossing the spread)
-        if (buyPrice < bestAsk - 0.0001 && afterInventory.length < this.cfg.maxOpenOrders - 1) {
-          await this._placeOrder(QPointOrderType.BUY, buyPrice, this.cfg.orderBaseQty);
-        }
-
-        // Place tightening ask
-        const afterBid = await this._getAiOpenOrders();
-        if (sellPrice > bestBid + 0.0001 && afterBid.length < this.cfg.maxOpenOrders) {
-          await this._placeOrder(QPointOrderType.SELL, sellPrice, this.cfg.orderBaseQty);
-        }
-      }
-    }
+    // Not applicable – price is fixed at $1.00. Skip spread tightening.
   }
 
   // =====================================================================
