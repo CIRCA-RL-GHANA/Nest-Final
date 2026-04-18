@@ -15,11 +15,24 @@ import { UpdateSubscriptionPlanDto } from './dto/update-subscription-plan.dto';
 import { ActivateSubscriptionDto } from './dto/activate-subscription.dto';
 import { AIPricingService } from '../ai/services/ai-pricing.service';
 import { AIRecommendationsService } from '../ai/services/ai-recommendations.service';
+import { RevenueService } from '@modules/revenue/revenue.service';
 
 @Injectable()
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
   private readonly FREE_PLAN_GRACE_DAYS = 30;
+
+  /**
+   * Calculate the monthly billing amount for a plan given a staff count.
+   * Per-staff plans: pricePerStaffQPoints × staffCount.
+   * Legacy flat plans: monthlyCostQPoints.
+   */
+  private calcMonthlyCost(plan: SubscriptionPlan, staffCount: number): number {
+    if (Number(plan.pricePerStaffQPoints) > 0) {
+      return Number(plan.pricePerStaffQPoints) * staffCount;
+    }
+    return Number(plan.monthlyCostQPoints);
+  }
 
   constructor(
     @InjectRepository(SubscriptionPlan)
@@ -37,6 +50,7 @@ export class SubscriptionsService {
     private readonly dataSource: DataSource,
     private readonly aiPricing: AIPricingService,
     private readonly aiRecommendations: AIRecommendationsService,
+    private readonly revenueService: RevenueService,
   ) {}
 
   /**
@@ -112,7 +126,15 @@ export class SubscriptionsService {
   }
 
   /**
-   * Activate subscription for Entity or Branch
+   * Activate subscription for Entity or Branch.
+   *
+   * Billing rules:
+   *  – Free plan: no charge.
+   *  – First-time subscriber (no previous assignment for this entity): free trial
+   *    month. Subscription fee is waived; all features unlocked. Transaction-fee
+   *    quota is 0 during the trial period (every tx costs $0.02 immediately).
+   *  – Subsequent activations: cost = plan.pricePerStaffQPoints × staffCount
+   *    (or plan.monthlyCostQPoints for legacy flat plans).
    */
   async activateSubscription(
     dto: ActivateSubscriptionDto,
@@ -143,26 +165,15 @@ export class SubscriptionsService {
         throw new NotFoundException('Q-Points account not found');
       }
 
-      // Check if Free plan - skip Q-Points deduction
       const isFree = plan.name === SubscriptionTier.FREE;
+      const staffCount = dto.staffCount ?? 1;
+      const monthlyCost = this.calcMonthlyCost(plan, staffCount);
 
-      if (!isFree) {
-        // Check sufficient Q-Points
-        if (qpointAccount.balance < plan.monthlyCostQPoints) {
-          await this.logAudit('Activate Subscription', 'ERROR', userId, {
-            reason: 'Insufficient Q-Points',
-            required: plan.monthlyCostQPoints,
-            available: qpointAccount.balance,
-          });
-          throw new BadRequestException('Insufficient Q-Points balance');
-        }
-
-        // Deduct Q-Points
-        qpointAccount.balance -= plan.monthlyCostQPoints;
-        qpointAccount.totalSpent += plan.monthlyCostQPoints;
-        qpointAccount.lastTransactionAt = new Date();
-        await manager.save(QPointAccount, qpointAccount);
-      }
+      // Determine if this is the first-ever subscription (free trial eligibility)
+      const previousAssignment = await manager.findOne(SubscriptionAssignment, {
+        where: { targetType: dto.targetType, targetId: dto.targetId },
+      });
+      const isFirstSubscription = !previousAssignment;
 
       // Check for existing active subscription
       const existing = await manager.findOne(SubscriptionAssignment, {
@@ -177,10 +188,33 @@ export class SubscriptionsService {
         throw new BadRequestException('Active subscription already exists for this target');
       }
 
-      // Calculate expiry date (30 days from now)
+      // Free trial: first month subscription fee waived; no deduction
+      const isInFreeTrial = isFirstSubscription && !isFree;
+
+      if (!isFree && !isInFreeTrial) {
+        // Check sufficient Q-Points
+        if (Number(qpointAccount.balance) < monthlyCost) {
+          await this.logAudit('Activate Subscription', 'ERROR', userId, {
+            reason: 'Insufficient Q-Points',
+            required: monthlyCost,
+            available: qpointAccount.balance,
+          });
+          throw new BadRequestException('Insufficient Q-Points balance');
+        }
+
+        // Deduct Q-Points
+        qpointAccount.balance = Number(qpointAccount.balance) - monthlyCost;
+        qpointAccount.totalSpent = Number(qpointAccount.totalSpent) + monthlyCost;
+        qpointAccount.lastTransactionAt = new Date();
+        await manager.save(QPointAccount, qpointAccount);
+      }
+
+      // Calculate dates
       const now = new Date();
       const expiresAt = new Date(now);
       expiresAt.setDate(expiresAt.getDate() + 30);
+
+      const freeTrialEndsAt = isInFreeTrial ? expiresAt : null;
 
       // Create subscription assignment
       const assignment = manager.create(SubscriptionAssignment, {
@@ -191,6 +225,9 @@ export class SubscriptionsService {
         activatedAt: now,
         expiresAt,
         autoRenew: true,
+        staffCount,
+        isInFreeTrial,
+        freeTrialEndsAt,
       });
 
       const savedAssignment = await manager.save(SubscriptionAssignment, assignment);
@@ -204,16 +241,26 @@ export class SubscriptionsService {
       });
 
       if (boosterAccount && plan.boosterPointsAllocation > 0) {
-        boosterAccount.balance += plan.boosterPointsAllocation;
-        boosterAccount.totalEarned += plan.boosterPointsAllocation;
+        boosterAccount.balance = Number(boosterAccount.balance) + Number(plan.boosterPointsAllocation);
+        boosterAccount.totalEarned = Number(boosterAccount.totalEarned) + Number(plan.boosterPointsAllocation);
         boosterAccount.lastTransactionAt = new Date();
         await manager.save(BoosterPointsAccount, boosterAccount);
       }
 
-      // Update entity/branch subscription status
+      // Update entity subscription status
       if (dto.targetType === SubscriptionTargetType.ENTITY) {
         entity.subscriptionPlanId = dto.planId;
         await manager.save(EntityProfile, entity);
+      }
+
+      // Record revenue (only when fee is actually charged)
+      if (!isFree && !isInFreeTrial && monthlyCost > 0) {
+        // Fire-and-forget; revenue record should not fail the activation
+        this.revenueService
+          .recordSubscriptionRevenue(dto.entityId, monthlyCost, staffCount, savedAssignment.id)
+          .catch((err: Error) =>
+            this.logger.error(`Revenue record failed for assignment ${savedAssignment.id}: ${err.message}`),
+          );
       }
 
       // Log audit
@@ -226,14 +273,18 @@ export class SubscriptionsService {
           targetId: dto.targetId,
           planId: dto.planId,
           planName: plan.name,
-          qpointsDeducted: isFree ? 0 : plan.monthlyCostQPoints,
+          staffCount,
+          monthlyCost,
+          qpointsDeducted: isFree || isInFreeTrial ? 0 : monthlyCost,
+          isInFreeTrial,
           boosterPointsAllocated: plan.boosterPointsAllocation,
         },
         manager,
       );
 
       this.logger.log(
-        `Subscription activated: ${savedAssignment.id} for ${dto.targetType} ${dto.targetId}`,
+        `Subscription activated: ${savedAssignment.id} for ${dto.targetType} ${dto.targetId}` +
+          (isInFreeTrial ? ' [FREE TRIAL]' : ''),
       );
       return savedAssignment;
     });
@@ -330,11 +381,17 @@ export class SubscriptionsService {
         throw new NotFoundException('Q-Points account not found');
       }
 
-      // Check if Free plan - skip Q-Points deduction
       const isFree = plan.name === SubscriptionTier.FREE;
+      const staffCount = assignment.staffCount ?? 1;
+      const monthlyCost = this.calcMonthlyCost(plan, staffCount);
+
+      // Free trial ends on first renewal — charge normally from here
+      const wasInFreeTrial = assignment.isInFreeTrial;
+      assignment.isInFreeTrial = false;
+      assignment.freeTrialEndsAt = null;
 
       if (!isFree) {
-        if (qpointAccount.balance < plan.monthlyCostQPoints) {
+        if (Number(qpointAccount.balance) < monthlyCost) {
           // Insufficient funds - deactivate subscription
           assignment.activated = false;
           assignment.autoRenew = false;
@@ -347,7 +404,7 @@ export class SubscriptionsService {
             {
               reason: 'Insufficient Q-Points',
               assignmentId: assignment.id,
-              required: plan.monthlyCostQPoints,
+              required: monthlyCost,
               available: qpointAccount.balance,
             },
             manager,
@@ -356,8 +413,8 @@ export class SubscriptionsService {
         }
 
         // Deduct Q-Points
-        qpointAccount.balance -= plan.monthlyCostQPoints;
-        qpointAccount.totalSpent += plan.monthlyCostQPoints;
+        qpointAccount.balance = Number(qpointAccount.balance) - monthlyCost;
+        qpointAccount.totalSpent = Number(qpointAccount.totalSpent) + monthlyCost;
         qpointAccount.lastTransactionAt = new Date();
         await manager.save(QPointAccount, qpointAccount);
       }
@@ -379,10 +436,19 @@ export class SubscriptionsService {
       });
 
       if (boosterAccount && plan.boosterPointsAllocation > 0) {
-        boosterAccount.balance += plan.boosterPointsAllocation;
-        boosterAccount.totalEarned += plan.boosterPointsAllocation;
+        boosterAccount.balance = Number(boosterAccount.balance) + Number(plan.boosterPointsAllocation);
+        boosterAccount.totalEarned = Number(boosterAccount.totalEarned) + Number(plan.boosterPointsAllocation);
         boosterAccount.lastTransactionAt = new Date();
         await manager.save(BoosterPointsAccount, boosterAccount);
+      }
+
+      // Record revenue
+      if (!isFree && monthlyCost > 0) {
+        this.revenueService
+          .recordSubscriptionRevenue(entityId, monthlyCost, staffCount, assignment.id)
+          .catch((err: Error) =>
+            this.logger.error(`Revenue record failed for renewal ${assignment.id}: ${err.message}`),
+          );
       }
 
       await this.logAudit(
@@ -392,7 +458,10 @@ export class SubscriptionsService {
         {
           assignmentId: assignment.id,
           planId: plan.id,
-          qpointsDeducted: isFree ? 0 : plan.monthlyCostQPoints,
+          staffCount,
+          monthlyCost,
+          qpointsDeducted: isFree ? 0 : monthlyCost,
+          wasInFreeTrial,
           boosterPointsAllocated: plan.boosterPointsAllocation,
           newExpiryDate,
         },

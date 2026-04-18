@@ -1,5 +1,5 @@
-import { Controller, Get } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Controller, Get, Query, Param } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import {
   HealthCheckService,
   HealthCheck,
@@ -8,6 +8,7 @@ import {
   DiskHealthIndicator,
 } from '@nestjs/terminus';
 import { Public } from '../auth/decorators/public.decorator';
+import { MonitoringService } from './monitoring.service';
 
 @ApiTags('health')
 @Controller('health')
@@ -18,6 +19,7 @@ export class HealthController {
     private db: TypeOrmHealthIndicator,
     private memory: MemoryHealthIndicator,
     private disk: DiskHealthIndicator,
+    private readonly monitoring: MonitoringService,
   ) {}
 
   @Get()
@@ -46,5 +48,43 @@ export class HealthController {
   @ApiResponse({ status: 200, description: 'Application is alive' })
   live() {
     return { status: 'ok', timestamp: new Date().toISOString() };
+  }
+
+  // ─────────────────────────────────────────────────────
+  // MONITORING ENDPOINTS
+  // ─────────────────────────────────────────────────────
+
+  @Get('metrics/system')
+  @ApiOperation({ summary: 'Get current system stats (memory, CPU, uptime)' })
+  getSystemStats() {
+    return this.monitoring.getSystemStats();
+  }
+
+  @Get('metrics/performance')
+  @ApiOperation({ summary: 'Get performance report for the given timeframe' })
+  @ApiQuery({ name: 'minutes', required: false, type: Number, description: 'Timeframe in minutes (default 60)' })
+  getPerformanceReport(@Query('minutes') minutes?: number) {
+    return this.monitoring.getPerformanceReport(minutes ? Number(minutes) : 60);
+  }
+
+  @Get('metrics/database')
+  @ApiOperation({ summary: 'Get database connection and size statistics' })
+  getDatabaseStats() {
+    return this.monitoring.getDatabaseStats();
+  }
+
+  @Get('metrics/custom')
+  @ApiOperation({ summary: 'Get custom recorded metrics' })
+  @ApiQuery({ name: 'name', required: false, type: String })
+  @ApiQuery({ name: 'since', required: false, type: String, description: 'ISO 8601 date string' })
+  getCustomMetrics(@Query('name') name?: string, @Query('since') since?: string) {
+    return this.monitoring.getCustomMetrics(name, since ? new Date(since) : undefined);
+  }
+
+  @Get('metrics/summary/:name')
+  @ApiOperation({ summary: 'Get aggregated summary for a custom metric' })
+  @ApiQuery({ name: 'minutes', required: false, type: Number })
+  getMetricSummary(@Param('name') name: string, @Query('minutes') minutes?: number) {
+    return this.monitoring.getMetricSummary(name, minutes ? Number(minutes) : 60);
   }
 }

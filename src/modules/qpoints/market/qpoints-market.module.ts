@@ -22,6 +22,7 @@ import { AiLiquidityManagerService } from './services/ai-liquidity-manager.servi
 // Gateway & Controller
 import { QPointsMarketGateway } from './gateway/qpoints-market.gateway';
 import { QPointsMarketController } from './qpoints-market.controller';
+import { RevenueModule } from '@modules/revenue/revenue.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { QPointsMarketController } from './qpoints-market.controller';
         signOptions: { expiresIn: cfg.get<string>('jwt.expiresIn') ?? '7d' },
       }),
     }),
+    RevenueModule,
   ],
   controllers: [QPointsMarketController],
   providers: [

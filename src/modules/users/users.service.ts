@@ -444,15 +444,28 @@ export class UsersService {
     return { exists: !!existing, phoneNumber };
   }
 
-  async resendOtp(phoneNumber: string): Promise<{ message: string }> {
-    const user = await this.userRepository.findOne({ where: { phoneNumber } });
+  async resendOtp(phoneNumber: string): Promise<{ message: string; isNewUser: boolean }> {
+    let user = await this.userRepository.findOne({ where: { phoneNumber } });
+    let isNewUser = false;
+
     if (!user) {
-      throw new NotFoundException('Phone number not registered.');
+      // Auto-create user with just phone number; remaining fields are completed during onboarding
+      user = this.userRepository.create({
+        phoneNumber,
+        socialUsername: null,
+        wireId: null,
+        passwordHash: null,
+      });
+      user = await this.userRepository.save(user);
+      isNewUser = true;
+
+      await this.logAudit('Auto User Creation', 'SUCCESS', user.id, { phoneNumber });
+      this.logger.log(`Auto-created user for new phone: ${user.id}`);
     }
 
     await this.generateAndSendOtp(phoneNumber);
     await this.logAudit('OTP Resend', 'SUCCESS', user.id, { phoneNumber });
 
-    return { message: 'OTP sent to phone number.' };
+    return { message: 'OTP sent to phone number.', isNewUser };
   }
 }

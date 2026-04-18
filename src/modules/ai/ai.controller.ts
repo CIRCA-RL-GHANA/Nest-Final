@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Body,
   Param,
   Query,
@@ -17,6 +18,11 @@ import { AIFraudService } from './services/ai-fraud.service';
 import { AIInsightsService } from './services/ai-insights.service';
 import { AISearchService } from './services/ai-search.service';
 import { AIRecommendationsService } from './services/ai-recommendations.service';
+import { WorkflowOrchestratorService, WorkflowDefinition } from './services/workflow-orchestrator.service';
+import { FeatureStoreService, FeatureRecord } from './services/feature-store.service';
+import { EtlService } from './services/etl.service';
+import { PluginService, RegisterPluginDto } from './services/plugin.service';
+import { EventBusService } from './services/event-bus.service';
 import { CreateAIModelDto } from './dto/create-ai-model.dto';
 import { CreateInferenceDto } from './dto/create-inference.dto';
 import { GetRecommendationsDto } from './dto/get-recommendations.dto';
@@ -26,8 +32,9 @@ import { AIModel, ModelStatus } from './entities/ai-model.entity';
 import { AIInference } from './entities/ai-inference.entity';
 import { AIFeature } from './entities/ai-feature.entity';
 import { AIRecommendation } from './entities/ai-recommendation.entity';
-import { AIWorkflow } from './entities/ai-workflow.entity';
+import { AIWorkflow, WorkflowStatus } from './entities/ai-workflow.entity';
 import { AIEvent } from './entities/ai-event.entity';
+import { PluginType, PluginStatus } from './entities/ai-plugin.entity';
 
 @ApiTags('ai')
 @Controller('ai')
@@ -40,6 +47,11 @@ export class AIController {
     private readonly insightsService: AIInsightsService,
     private readonly searchService: AISearchService,
     private readonly recommendationService: AIRecommendationsService,
+    private readonly workflowOrchestrator: WorkflowOrchestratorService,
+    private readonly featureStore: FeatureStoreService,
+    private readonly etlService: EtlService,
+    private readonly pluginService: PluginService,
+    private readonly eventBus: EventBusService,
   ) {}
 
   // ============ Models ============
@@ -710,5 +722,225 @@ export class AIController {
     }>,
   ) {
     return this.recommendationService.scoreWishlistConversion(items ?? []);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // WORKFLOW ORCHESTRATOR ENDPOINTS
+  // ════════════════════════════════════════════════════════════════════════
+
+  @Post('orchestrator/workflows')
+  @ApiOperation({ summary: 'Create a new workflow definition' })
+  @ApiResponse({ status: 201, description: 'Workflow created', type: AIWorkflow })
+  createOrchestratorWorkflow(@Body() definition: WorkflowDefinition): Promise<AIWorkflow> {
+    return this.workflowOrchestrator.createWorkflow(definition);
+  }
+
+  @Post('orchestrator/workflows/:id/execute')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Execute a workflow by ID' })
+  @ApiResponse({ status: 200, description: 'Workflow execution result', type: AIWorkflow })
+  executeWorkflow(
+    @Param('id') id: string,
+    @Body() inputData: Record<string, any>,
+  ): Promise<AIWorkflow> {
+    return this.workflowOrchestrator.executeWorkflow(id, inputData);
+  }
+
+  @Put('orchestrator/workflows/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel a running or pending workflow' })
+  @ApiResponse({ status: 200, description: 'Workflow cancelled', type: AIWorkflow })
+  cancelWorkflow(@Param('id') id: string): Promise<AIWorkflow> {
+    return this.workflowOrchestrator.cancelWorkflow(id);
+  }
+
+  @Get('orchestrator/workflows/:id')
+  @ApiOperation({ summary: 'Get workflow state' })
+  @ApiResponse({ status: 200, description: 'Workflow state', type: AIWorkflow })
+  getOrchestratorWorkflow(@Param('id') id: string): Promise<AIWorkflow> {
+    return this.workflowOrchestrator.getWorkflow(id);
+  }
+
+  @Get('orchestrator/workflows')
+  @ApiOperation({ summary: 'List workflows with optional status filter' })
+  @ApiResponse({ status: 200, description: 'Workflow list', type: [AIWorkflow] })
+  @ApiQuery({ name: 'status', required: false, enum: WorkflowStatus })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  listOrchestratorWorkflows(
+    @Query('status') status?: WorkflowStatus,
+    @Query('limit') limit?: number,
+  ): Promise<AIWorkflow[]> {
+    return this.workflowOrchestrator.listWorkflows(status, limit);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // FEATURE STORE ENDPOINTS
+  // ════════════════════════════════════════════════════════════════════════
+
+  @Get('feature-store/:entityType/:entityId')
+  @ApiOperation({ summary: 'Get all features for an entity' })
+  getEntityFeatures(
+    @Param('entityType') entityType: string,
+    @Param('entityId') entityId: string,
+  ): Promise<Record<string, any>> {
+    return this.featureStore.getEntityFeatures(entityType, entityId);
+  }
+
+  @Get('feature-store/:entityType/:entityId/:featureName')
+  @ApiOperation({ summary: 'Get a specific feature value' })
+  getFeatureValue(
+    @Param('entityType') entityType: string,
+    @Param('entityId') entityId: string,
+    @Param('featureName') featureName: string,
+  ): Promise<any> {
+    return this.featureStore.getFeature(entityType, entityId, featureName);
+  }
+
+  @Post('feature-store')
+  @ApiOperation({ summary: 'Set a feature value' })
+  @ApiResponse({ status: 201, description: 'Feature saved', type: AIFeature })
+  setFeatureValue(@Body() record: FeatureRecord): Promise<AIFeature> {
+    return this.featureStore.setFeature(record);
+  }
+
+  @Post('feature-store/batch')
+  @ApiOperation({ summary: 'Batch set feature values' })
+  @ApiResponse({ status: 201, description: 'Features saved', type: [AIFeature] })
+  batchSetFeatures(@Body('features') features: FeatureRecord[]): Promise<AIFeature[]> {
+    return this.featureStore.batchSetFeatures(features ?? []);
+  }
+
+  @Delete('feature-store/:entityType/:entityId/:featureName')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a specific feature' })
+  deleteFeature(
+    @Param('entityType') entityType: string,
+    @Param('entityId') entityId: string,
+    @Param('featureName') featureName: string,
+  ): Promise<void> {
+    return this.featureStore.deleteFeature(entityType, entityId, featureName);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // ETL PIPELINE ENDPOINTS
+  // ════════════════════════════════════════════════════════════════════════
+
+  @Post('etl/pipelines/:name/trigger')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Manually trigger an ETL pipeline' })
+  triggerPipeline(
+    @Param('name') name: string,
+    @Body() options: Record<string, any>,
+  ) {
+    return this.etlService.runPipeline(name, options);
+  }
+
+  @Post('etl/pipelines/:name/queue')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Queue an ETL pipeline for background execution' })
+  queuePipeline(
+    @Param('name') name: string,
+    @Body() options: Record<string, any>,
+  ): Promise<void> {
+    return this.etlService.queuePipeline(name, options);
+  }
+
+  @Get('etl/pipelines')
+  @ApiOperation({ summary: 'Get all ETL pipeline statuses' })
+  getAllPipelineStatuses() {
+    return this.etlService.getAllPipelineStatuses();
+  }
+
+  @Get('etl/pipelines/:name/status')
+  @ApiOperation({ summary: 'Get status of a specific ETL pipeline' })
+  getPipelineStatus(@Param('name') name: string) {
+    return this.etlService.getPipelineStatus(name);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // PLUGIN SYSTEM ENDPOINTS
+  // ════════════════════════════════════════════════════════════════════════
+
+  @Post('plugins')
+  @ApiOperation({ summary: 'Register a new plugin' })
+  @ApiResponse({ status: 201, description: 'Plugin registered' })
+  registerPlugin(@Body() dto: RegisterPluginDto) {
+    return this.pluginService.register(dto);
+  }
+
+  @Get('plugins')
+  @ApiOperation({ summary: 'List all registered plugins' })
+  @ApiQuery({ name: 'type', required: false, enum: PluginType })
+  listPlugins(@Query('type') type?: PluginType) {
+    return this.pluginService.findAll(type);
+  }
+
+  @Get('plugins/:name')
+  @ApiOperation({ summary: 'Get a plugin by name' })
+  getPlugin(@Param('name') name: string) {
+    return this.pluginService.findByName(name);
+  }
+
+  @Post('plugins/:name/execute')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Execute a plugin with input data' })
+  executePlugin(@Param('name') name: string, @Body() input: any) {
+    return this.pluginService.execute(name, input);
+  }
+
+  @Put('plugins/:name/status')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update plugin status (active/inactive)' })
+  updatePluginStatus(@Param('name') name: string, @Body('status') status: PluginStatus) {
+    return this.pluginService.setStatus(name, status);
+  }
+
+  @Delete('plugins/:name')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a plugin' })
+  deletePlugin(@Param('name') name: string): Promise<void> {
+    return this.pluginService.delete(name);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // EVENT BUS ENDPOINTS
+  // ════════════════════════════════════════════════════════════════════════
+
+  @Post('event-bus/emit')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Emit an event to the event bus' })
+  emitEvent(
+    @Body('eventName') eventName: string,
+    @Body('payload') payload: Record<string, any>,
+    @Body('options') options?: { persist?: boolean; async?: boolean; entityType?: string; entityId?: string; userId?: string },
+  ): Promise<void> {
+    return this.eventBus.emit(eventName, payload ?? {}, options ?? {});
+  }
+
+  @Get('event-bus/events/unprocessed')
+  @ApiOperation({ summary: 'Get unprocessed events from the event bus' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getUnprocessedBusEvents(@Query('limit') limit?: number) {
+    return this.eventBus.getUnprocessedEvents(limit);
+  }
+
+  @Get('event-bus/events/:eventName')
+  @ApiOperation({ summary: 'Get recent events by name' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getEventsByName(@Param('eventName') eventName: string, @Query('limit') limit?: number) {
+    return this.eventBus.getEventsByName(eventName, limit);
+  }
+
+  @Put('event-bus/events/:id/processed')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Mark an event as processed' })
+  markEventBusEventProcessed(@Param('id') id: string): Promise<void> {
+    return this.eventBus.markProcessed(id);
+  }
+
+  @Get('event-bus/subscriptions')
+  @ApiOperation({ summary: 'List all active event subscriptions' })
+  listEventSubscriptions() {
+    return { events: this.eventBus.listEvents() };
   }
 }

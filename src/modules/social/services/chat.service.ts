@@ -240,7 +240,7 @@ export class ChatService {
       this.logger.log(`Retrieved ${requests.length} HeyYa requests for user ${userId}`);
       return requests;
     } catch (error) {
-      this.logger.error(`Failed to get HeyYa requests: ${error.message}`);
+      this.logger.error(`Failed to get HeyYa requests: ${(error as Error).message}`);
       throw error;
     }
   }
@@ -261,7 +261,7 @@ export class ChatService {
         };
       });
     } catch (error) {
-      this.logger.error(`Failed to get user contacts: ${error.message}`);
+      this.logger.error(`Failed to get user contacts: ${(error as Error).message}`);
       throw error;
     }
   }

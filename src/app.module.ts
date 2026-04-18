@@ -46,6 +46,7 @@ import { WalletsModule } from './modules/wallets/wallets.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { GoModule } from './modules/go/go.module';
 import { QPointsMarketModule } from './modules/qpoints/market/qpoints-market.module';
+import { RevenueModule } from './modules/revenue/revenue.module';
 
 @Module({
   imports: [
@@ -105,12 +106,12 @@ import { QPointsMarketModule } from './modules/qpoints/market/qpoints-market.mod
             ),
           }),
           new winston.transports.File({
-            filename: `${configService.get('LOG_FILE_PATH')}/error.log`,
+            filename: `${configService.get<string>('logging.filePath') ?? './logs'}/error.log`,
             level: 'error',
             format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
           }),
           new winston.transports.File({
-            filename: `${configService.get('LOG_FILE_PATH')}/combined.log`,
+            filename: `${configService.get<string>('logging.filePath') ?? './logs'}/combined.log`,
             format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
           }),
         ],
@@ -149,6 +150,7 @@ import { QPointsMarketModule } from './modules/qpoints/market/qpoints-market.mod
     PaymentsModule,
     GoModule,
     QPointsMarketModule,
+    RevenueModule,
   ],
   providers: [
     {

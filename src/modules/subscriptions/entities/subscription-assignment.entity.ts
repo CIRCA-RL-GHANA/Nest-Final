@@ -47,6 +47,28 @@ export class SubscriptionAssignment extends BaseEntity {
   @Column({ type: 'timestamp', nullable: true })
   lastRenewalAt: Date;
 
+  @ApiProperty({
+    description:
+      'Number of active staff at the time of billing. Used to calculate per-staff subscription cost.',
+    example: 5,
+  })
+  @Column({ type: 'int', default: 1 })
+  staffCount: number;
+
+  @ApiProperty({
+    description:
+      'Whether this assignment is in its first-month free trial. ' +
+      'During a free trial the subscription fee is waived and all plan features are unlocked, ' +
+      'but the transaction fee free-quota is 0 (every transaction costs $0.02 immediately).',
+    example: false,
+  })
+  @Column({ type: 'boolean', default: false })
+  isInFreeTrial: boolean;
+
+  @ApiProperty({ description: 'Timestamp when the free trial period ends', required: false })
+  @Column({ type: 'timestamp', nullable: true })
+  freeTrialEndsAt: Date | null;
+
   // Relations
   @ManyToOne(() => SubscriptionPlan, { eager: false, nullable: false })
   @JoinColumn({ name: 'planId' })

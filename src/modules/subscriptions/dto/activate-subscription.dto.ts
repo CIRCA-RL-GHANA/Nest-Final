@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsUUID, IsEnum } from 'class-validator';
+import { IsNotEmpty, IsUUID, IsEnum, IsInt, Min, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { SubscriptionTargetType } from '../entities/subscription-assignment.entity';
 
@@ -26,4 +26,16 @@ export class ActivateSubscriptionDto {
   @IsNotEmpty()
   @IsUUID()
   entityId: string;
+
+  @ApiProperty({
+    description:
+      'Number of active staff members. Monthly cost = pricePerStaffQPoints × staffCount. ' +
+      'Defaults to 1 if not provided.',
+    example: 5,
+    required: false,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  staffCount?: number;
 }

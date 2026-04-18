@@ -9,6 +9,7 @@ import { BoosterPointsAccount } from '@modules/qpoints/entities/booster-points-a
 import { EntityProfile } from '@modules/entities/entities/entity.entity';
 import { AuditLog } from '@modules/users/entities/audit-log.entity';
 import { AIModule } from '../ai/ai.module';
+import { RevenueModule } from '@modules/revenue/revenue.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { AIModule } from '../ai/ai.module';
       AuditLog,
     ]),
     AIModule,
+    RevenueModule,
   ],
   controllers: [SubscriptionsController],
   providers: [SubscriptionsService],

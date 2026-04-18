@@ -12,6 +12,7 @@ import { QPointTrade } from '../entities/q-point-trade.entity';
 import { MarketBalanceService } from './market-balance.service';
 import { SettlementService } from './settlement.service';
 import { MarketNotificationService } from './market-notification.service';
+import { RevenueService } from '@modules/revenue/revenue.service';
 
 export interface PriceLevel {
   price: number;
@@ -53,6 +54,7 @@ export class OrderBookService {
     private readonly balance: MarketBalanceService,
     private readonly settlement: SettlementService,
     private readonly notifications: MarketNotificationService,
+    private readonly revenue: RevenueService,
   ) {}
 
   // ========================================================================
@@ -333,6 +335,16 @@ export class OrderBookService {
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           this.logger.error(`Settlement error for trade ${trade.id}: ${msg}`);
+        });
+
+      // Charge $0.02 trade fee from the taker (the order that was just placed).
+      // Fire-and-forget: a fee failure must not reverse the trade.
+      const takerId = isBuyerOrder ? buyerId : sellerId;
+      this.revenue
+        .chargeTradeFee(takerId, trade.id)
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.error(`Trade fee error for trade ${trade.id}: ${msg}`);
         });
 
       // Notify both parties

@@ -32,11 +32,31 @@ export class CreateSubscriptionPlanDto {
   @Min(0)
   boosterPointsAllocation: number;
 
-  @ApiProperty({ description: 'Monthly cost in Q-Points', example: 50 })
-  @IsNotEmpty()
+  @ApiProperty({ description: 'Flat monthly cost in Q-Points (legacy / Free tier)', example: 0 })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  monthlyCostQPoints: number;
+  monthlyCostQPoints?: number;
+
+  @ApiProperty({
+    description: 'Cost per active staff member per month in Q-Points ($4 basic tier = 4 QP)',
+    example: 4,
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  pricePerStaffQPoints?: number;
+
+  @ApiProperty({ description: 'Includes native social features', example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  includesSocialFeatures?: boolean;
+
+  @ApiProperty({ description: 'Includes marketing tools', example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  includesMarketingTools?: boolean;
 
   @ApiProperty({ description: 'Maximum branches allowed', required: false, example: 5 })
   @IsOptional()

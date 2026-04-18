@@ -16,21 +16,23 @@ export class User extends BaseEntity {
   @ApiProperty({
     description: 'Social username for the user',
     example: 'john_doe',
+    required: false,
   })
-  @Column({ unique: true })
+  @Column({ unique: true, nullable: true })
   @Index()
-  socialUsername: string;
+  socialUsername: string | null;
 
   @ApiProperty({
     description: 'Wire ID for the user',
     example: '@johndoe',
+    required: false,
   })
-  @Column({ unique: true })
+  @Column({ unique: true, nullable: true })
   @Index()
-  wireId: string;
+  wireId: string | null;
 
-  @Column({ select: false })
-  passwordHash: string;
+  @Column({ select: false, nullable: true })
+  passwordHash: string | null;
 
   @ApiProperty({
     description: 'Whether biometric verification is enabled',
