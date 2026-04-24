@@ -95,7 +95,7 @@ export const validationSchema = Joi.object({
   PAYMENT_FACILITATOR_SECRET_KEY: Joi.string().allow('').default('mock_key'),
   PAYMENT_FACILITATOR_PUBLIC_KEY: Joi.string().allow('').default(''),
   PAYMENT_FACILITATOR_WEBHOOK_SECRET: Joi.string().allow('').default(''),
-  PAYMENT_FACILITATOR_CURRENCY: Joi.string().default('NGN'),
+  PAYMENT_FACILITATOR_CURRENCY: Joi.string().default('GHS'),
   PAYMENT_FACILITATOR_WEBHOOK_URL: Joi.string().uri().allow('').default(''),
 
   // Q Points AI Market Maker

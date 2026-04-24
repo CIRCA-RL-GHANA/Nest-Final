@@ -130,7 +130,7 @@ export const configuration = () => ({
     facilitatorSecretKey: process.env.PAYMENT_FACILITATOR_SECRET_KEY ?? 'mock_key',
     facilitatorPublicKey: process.env.PAYMENT_FACILITATOR_PUBLIC_KEY ?? '',
     webhookSecret: process.env.PAYMENT_FACILITATOR_WEBHOOK_SECRET ?? '',
-    facilitatorCurrency: process.env.PAYMENT_FACILITATOR_CURRENCY ?? 'NGN',
+    facilitatorCurrency: process.env.PAYMENT_FACILITATOR_CURRENCY ?? 'GHS',
     facilitatorWebhookUrl: process.env.PAYMENT_FACILITATOR_WEBHOOK_URL ?? '',
   },
 });

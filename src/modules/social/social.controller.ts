@@ -20,6 +20,7 @@ import { CreateUpdateDto } from './dto/create-update.dto';
 import { UpdateUpdateDto } from './dto/update-update.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { CreateEngagementDto } from './dto/create-engagement.dto';
+import { CreateReportDto } from './dto/create-report.dto';
 import { UpdateVisibility } from './entities/update.entity';
 import { EngagementType, EngagementTarget } from './entities/engagement.entity';
 
@@ -326,5 +327,23 @@ export class SocialController {
   ) {
     dto.updateId = updateId;
     return this.socialService.createComment(this.resolveUserId(authorId, req), dto);
+  }
+
+  // Content Reports
+  @Post('reports')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Report a content item (update, comment, user)' })
+  @ApiResponse({ status: HttpStatus.CREATED, description: 'Report submitted successfully' })
+  @ApiQuery({
+    name: 'reporterId',
+    required: false,
+    description: 'Reporter ID (falls back to JWT user)',
+  })
+  createReport(
+    @Body() dto: CreateReportDto,
+    @Query('reporterId') reporterId: string,
+    @Req() req?: any,
+  ) {
+    return this.socialService.createReport(this.resolveUserId(reporterId, req), dto);
   }
 }

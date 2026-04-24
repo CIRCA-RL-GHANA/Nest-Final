@@ -13,12 +13,14 @@ import { ChatMessage } from './entities/chat-message.entity';
 import { Update, UpdateVisibility } from './entities/update.entity';
 import { UpdateComment } from './entities/update-comment.entity';
 import { Engagement, EngagementType, EngagementTarget } from './entities/engagement.entity';
+import { ContentReport } from './entities/content-report.entity';
 import { CreateHeyYaRequestDto } from './dto/create-heyya-request.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { CreateUpdateDto } from './dto/create-update.dto';
 import { UpdateUpdateDto } from './dto/update-update.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { CreateEngagementDto } from './dto/create-engagement.dto';
+import { CreateReportDto } from './dto/create-report.dto';
 import { AINlpService } from '../ai/services/ai-nlp.service';
 import { AIRecommendationsService } from '../ai/services/ai-recommendations.service';
 
@@ -39,6 +41,8 @@ export class SocialService {
     private commentRepository: Repository<UpdateComment>,
     @InjectRepository(Engagement)
     private engagementRepository: Repository<Engagement>,
+    @InjectRepository(ContentReport)
+    private contentReportRepository: Repository<ContentReport>,
     private readonly aiNlp: AINlpService,
     private readonly aiRecommendations: AIRecommendationsService,
   ) {}
@@ -427,5 +431,14 @@ export class SocialService {
     }
 
     return await query.orderBy('engagement.createdAt', 'DESC').getMany();
+  }
+
+  // Content Reports
+  async createReport(reporterId: string, dto: CreateReportDto): Promise<ContentReport> {
+    const report = this.contentReportRepository.create({
+      ...dto,
+      reporterId,
+    });
+    return await this.contentReportRepository.save(report);
   }
 }

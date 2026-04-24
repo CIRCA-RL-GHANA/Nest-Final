@@ -9,6 +9,7 @@ import { ChatMessage } from './entities/chat-message.entity';
 import { Update } from './entities/update.entity';
 import { UpdateComment } from './entities/update-comment.entity';
 import { Engagement } from './entities/engagement.entity';
+import { ContentReport } from './entities/content-report.entity';
 import { AIModule } from '../ai/ai.module';
 
 @Module({
@@ -20,6 +21,7 @@ import { AIModule } from '../ai/ai.module';
       Update,
       UpdateComment,
       Engagement,
+      ContentReport,
     ]),
     AIModule,
   ],

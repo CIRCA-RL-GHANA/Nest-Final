@@ -66,6 +66,24 @@ export class QPointsTransactionService {
   ) {}
 
   /**
+   * Resolve a QPointAccount by userId (entity owner lookup).
+   * Used when the client does not supply an explicit accountId.
+   */
+  async getAccountByUserId(userId: string): Promise<QPointAccount> {
+    // QPointAccount → entityId → EntityProfile (table: 'entities') → ownerId
+    const account = await this.accountRepository
+      .createQueryBuilder('account')
+      .innerJoin('entities', 'entity', 'entity.id = account."entityId"')
+      .where('entity."ownerId" = :userId', { userId })
+      .getOne();
+
+    if (!account) {
+      throw new NotFoundException(`No QPoint account found for user ${userId}`);
+    }
+    return account;
+  }
+
+  /**
    * Deposit Q-Points into an account
    */
   async deposit(
@@ -74,6 +92,16 @@ export class QPointsTransactionService {
     ipAddress?: string,
     deviceFingerprint?: string,
   ): Promise<QPointTransaction> {
+    // Resolve accountId from JWT userId when not explicitly provided
+    if (!dto.accountId && userId) {
+      const account = await this.getAccountByUserId(userId);
+      dto.accountId = account.id;
+    }
+    // Normalise description/paymentReference
+    if (!dto.paymentReference && dto.description) {
+      dto.paymentReference = dto.description;
+    }
+
     this.logger.log(`Processing deposit of ${dto.amount} Q-Points to account ${dto.accountId}`);
 
     const account = await this.accountRepository.findOne({
@@ -218,6 +246,17 @@ export class QPointsTransactionService {
     ipAddress?: string,
     deviceFingerprint?: string,
   ): Promise<QPointTransaction> {
+    // Resolve source account from JWT userId when not explicitly provided
+    if (!dto.sourceAccountId && userId) {
+      const srcAccount = await this.getAccountByUserId(userId);
+      dto.sourceAccountId = srcAccount.id;
+    }
+    // Resolve destination account from toUserId when destinationAccountId not provided
+    if (!dto.destinationAccountId && dto.toUserId) {
+      const destAccount = await this.getAccountByUserId(dto.toUserId);
+      dto.destinationAccountId = destAccount.id;
+    }
+
     this.logger.log(
       `Processing transfer of ${dto.amount} Q-Points from ${dto.sourceAccountId} to ${dto.destinationAccountId}`,
     );
@@ -384,6 +423,19 @@ export class QPointsTransactionService {
     ipAddress?: string,
     deviceFingerprint?: string,
   ): Promise<QPointTransaction> {
+    // Resolve accountId from JWT userId when not explicitly provided
+    if (!dto.accountId && userId) {
+      const account = await this.getAccountByUserId(userId);
+      dto.accountId = account.id;
+    }
+    // Normalise destination/description
+    if (!dto.destination && dto.description) {
+      dto.destination = dto.description;
+    }
+    if (!dto.withdrawalMethod) {
+      dto.withdrawalMethod = 'default';
+    }
+
     this.logger.log(
       `Processing withdrawal of ${dto.amount} Q-Points from account ${dto.accountId}`,
     );
