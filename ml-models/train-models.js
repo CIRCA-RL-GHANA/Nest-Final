@@ -3,7 +3,7 @@
 /**
  * PROMPT Genie — ML Model Training Script (Node.js / tfjs-node)
  * ==============================================================
- * Trains all 4 TF.js models using @tensorflow/tfjs-node and exports them
+ * Trains all 5 TF.js models using @tensorflow/tfjs-node and exports them
  * as LayersModel format (model.json + weight shards) ready for the
  * NestJS AITensorflowService to load at startup.
  *
@@ -13,6 +13,7 @@
  *   pricing/         Dynamic surge-pricing regressor (5 features → surge norm)
  *   recommendations/ User–item relevance scorer      (10 features → probability)
  *   discount/        Product discount optimiser      (5 features → discount norm)
+ *   churn/           Subscription churn predictor   (4 features → probability)
  *
  * Usage
  * -----
@@ -160,7 +161,7 @@ async function saveModel(model, name) {
 // MODEL 1 — FRAUD DETECTION
 // ══════════════════════════════════════════════════════════════════════════
 async function buildFraud() {
-  header('MODEL 1 / 4 — Fraud Detection');
+  header('MODEL 1 / 5 — Fraud Detection');
 
   const n = N_SAMPLES;
 
@@ -266,7 +267,7 @@ async function buildFraud() {
 // MODEL 2 — DYNAMIC SURGE PRICING
 // ══════════════════════════════════════════════════════════════════════════
 async function buildPricing() {
-  header('MODEL 2 / 4 — Dynamic Surge Pricing');
+  header('MODEL 2 / 5 — Dynamic Surge Pricing');
 
   const n = N_SAMPLES;
 
@@ -377,7 +378,7 @@ async function buildPricing() {
 // MODEL 3 — RECOMMENDATIONS (user–item relevance)
 // ══════════════════════════════════════════════════════════════════════════
 async function buildRecommendations() {
-  header('MODEL 3 / 4 — Recommendations (User–Item Relevance)');
+  header('MODEL 3 / 5 — Recommendations (User–Item Relevance)');
 
   const n = N_SAMPLES;
 
@@ -476,7 +477,7 @@ async function buildRecommendations() {
 // MODEL 4 — DISCOUNT OPTIMISATION
 // ══════════════════════════════════════════════════════════════════════════
 async function buildDiscount() {
-  header('MODEL 4 / 4 — Discount Optimisation');
+  header('MODEL 4 / 5 — Discount Optimisation');
 
   const n = N_SAMPLES;
 
