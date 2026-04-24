@@ -23,6 +23,8 @@ import { FeatureStoreService } from './services/feature-store.service';
 import { EtlService } from './services/etl.service';
 import { PluginService } from './services/plugin.service';
 import { EventBusService } from './services/event-bus.service';
+import { ModelProvenanceService } from './services/model-provenance.service';
+import { AiInputSanitizerGuard } from '../../common/guards/ai-input-sanitizer.guard';
 import { EtlProcessor } from './processors/etl.processor';
 import { EventBusProcessor } from './processors/event-bus.processor';
 
@@ -60,6 +62,8 @@ import { EventBusProcessor } from './processors/event-bus.processor';
     EventBusService,
     EtlProcessor,
     EventBusProcessor,
+    ModelProvenanceService,
+    AiInputSanitizerGuard,
   ],
   exports: [
     AIService,
@@ -73,6 +77,7 @@ import { EventBusProcessor } from './processors/event-bus.processor';
     WorkflowOrchestratorService,
     FeatureStoreService,
     EtlService,
+    ModelProvenanceService,
     PluginService,
     EventBusService,
   ],

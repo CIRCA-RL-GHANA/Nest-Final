@@ -79,6 +79,7 @@ export const validationSchema = Joi.object({
   AI_SURGE_MAX_MULTIPLIER: Joi.number().default(3.5),
   AI_PLATFORM_FEE_PCT: Joi.number().default(8),
   ML_MODEL_PATH: Joi.string().default('./ml-models'),
+  ML_MODEL_SIGNING_SECRET: Joi.string().min(32).default('change-me-to-a-32-char-secret-key!!'),
   FEATURE_STORE_UPDATE_INTERVAL: Joi.number().default(300000),
 
   // Google Maps

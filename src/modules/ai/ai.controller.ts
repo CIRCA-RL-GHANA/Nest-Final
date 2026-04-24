@@ -9,8 +9,10 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBody } from '@nestjs/swagger';
+import { AiInputSanitizerGuard } from '../../common/guards/ai-input-sanitizer.guard';
 import { AIService } from './ai.service';
 import { AINlpService } from './services/ai-nlp.service';
 import { AIPricingService } from './services/ai-pricing.service';
@@ -23,6 +25,7 @@ import { FeatureStoreService, FeatureRecord } from './services/feature-store.ser
 import { EtlService } from './services/etl.service';
 import { PluginService, RegisterPluginDto } from './services/plugin.service';
 import { EventBusService } from './services/event-bus.service';
+import { ModelProvenanceService } from './services/model-provenance.service';
 import { CreateAIModelDto } from './dto/create-ai-model.dto';
 import { CreateInferenceDto } from './dto/create-inference.dto';
 import { GetRecommendationsDto } from './dto/get-recommendations.dto';
@@ -38,6 +41,7 @@ import { PluginType, PluginStatus } from './entities/ai-plugin.entity';
 
 @ApiTags('ai')
 @Controller('ai')
+@UseGuards(AiInputSanitizerGuard)
 export class AIController {
   constructor(
     private readonly aiService: AIService,
@@ -52,7 +56,62 @@ export class AIController {
     private readonly etlService: EtlService,
     private readonly pluginService: PluginService,
     private readonly eventBus: EventBusService,
+    private readonly modelProvenance: ModelProvenanceService,
   ) {}
+
+  // ============ Model Provenance & Signing ============
+
+  @Post('models/:id/sign')
+  @ApiOperation({ summary: 'Sign a model artifact (MLOps pipeline use)' })
+  @ApiResponse({ status: 201, description: 'Model signed' })
+  signModel(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      version: string;
+      roleShard: string;
+      sha256Hash: string;
+      sizeBytes: number;
+      trainedAt: string;
+    },
+  ) {
+    return this.modelProvenance.sign({
+      modelId: id,
+      version: body.version,
+      roleShard: body.roleShard,
+      sha256Hash: body.sha256Hash,
+      sizeBytes: body.sizeBytes,
+      trainedAt: new Date(body.trainedAt),
+    });
+  }
+
+  @Post('models/:id/verify')
+  @ApiOperation({ summary: 'Client verifies model integrity before loading' })
+  @ApiResponse({ status: 200, description: 'Verification result' })
+  verifyModel(
+    @Param('id') id: string,
+    @Body() body: { version: string; sha256Hash: string },
+  ): { verified: boolean } {
+    const verified = this.modelProvenance.verify(id, body.version, body.sha256Hash);
+    return { verified };
+  }
+
+  @Get('models/provenance/active')
+  @ApiOperation({ summary: 'Get active signed models for a role shard' })
+  @ApiQuery({ name: 'roleShard', required: true, type: String })
+  getActiveSignedModels(@Query('roleShard') roleShard: string) {
+    return this.modelProvenance.getActive(roleShard);
+  }
+
+  @Post('models/:id/rollback')
+  @ApiOperation({ summary: 'Roll back a model version (MLOps safety valve)' })
+  rollbackModel(
+    @Param('id') id: string,
+    @Body() body: { version: string },
+  ): { rolled_back: boolean } {
+    this.modelProvenance.rollback(id, body.version);
+    return { rolled_back: true };
+  }
 
   // ============ Models ============
 
