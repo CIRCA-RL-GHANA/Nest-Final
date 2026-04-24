@@ -47,6 +47,8 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { GoModule } from './modules/go/go.module';
 import { QPointsMarketModule } from './modules/qpoints/market/qpoints-market.module';
 import { RevenueModule } from './modules/revenue/revenue.module';
+import { EplayModule } from './modules/eplay/eplay.module';
+import { CommunityModule } from './modules/community/community.module';
 
 @Module({
   imports: [
@@ -151,6 +153,8 @@ import { RevenueModule } from './modules/revenue/revenue.module';
     GoModule,
     QPointsMarketModule,
     RevenueModule,
+    EplayModule,
+    CommunityModule,
   ],
   providers: [
     {
