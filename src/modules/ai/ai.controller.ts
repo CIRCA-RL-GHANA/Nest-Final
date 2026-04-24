@@ -397,7 +397,7 @@ export class AIController {
   @Post('pricing/ride')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Compute AI dynamic ride pricing with surge' })
-  computeRidePrice(
+  async computeRidePrice(
     @Body()
     body: {
       baseDistance: number;
@@ -410,7 +410,7 @@ export class AIController {
       supplyFactor?: number;
     },
   ) {
-    return this.pricingService.computeRidePrice(
+    return this.pricingService.computeRidePriceAsync(
       {
         baseDistance: body.baseDistance,
         pickupLat: body.pickupLat,
@@ -428,7 +428,7 @@ export class AIController {
   @Post('pricing/discount')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get AI discount recommendation for a product' })
-  recommendDiscount(
+  async recommendDiscount(
     @Body()
     body: {
       currentPrice: number;
@@ -438,7 +438,7 @@ export class AIController {
       stockLevel: number;
     },
   ) {
-    return this.pricingService.recommendDiscount(
+    return this.pricingService.recommendDiscountAsync(
       body.currentPrice,
       body.daysSinceLastSale,
       body.viewCount,
@@ -450,7 +450,7 @@ export class AIController {
   @Post('pricing/retention')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get AI subscription retention discount offer' })
-  suggestRetentionDiscount(
+  async suggestRetentionDiscount(
     @Body()
     body: {
       monthsSubscribed: number;
@@ -459,7 +459,7 @@ export class AIController {
       currentMonthlyPrice: number;
     },
   ) {
-    return this.pricingService.suggestRetentionDiscount(
+    return this.pricingService.suggestRetentionDiscountAsync(
       body.monthsSubscribed,
       body.lastLoginDaysAgo,
       body.featureUsageScore,
@@ -474,7 +474,7 @@ export class AIController {
   @Post('fraud/score')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Score a transaction for fraud risk (0–1)' })
-  scoreTransaction(
+  async scoreTransaction(
     @Body()
     body: {
       userId: string;
@@ -490,7 +490,7 @@ export class AIController {
       avgHistoricAmount?: number;
     },
   ) {
-    return this.fraudService.scoreTransaction(body);
+    return this.fraudService.scoreTransactionAsync(body);
   }
 
   @Post('fraud/location')
@@ -722,6 +722,42 @@ export class AIController {
     }>,
   ) {
     return this.recommendationService.scoreWishlistConversion(items ?? []);
+  }
+
+  @Post('recommendations/rank-relevance')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Rank items by TF-model relevance for a user profile (70% TF + 30% NLP; falls back to NLP)',
+  })
+  async rankItemsByRelevance(
+    @Body('userFeatures')
+    userFeatures: {
+      ageNorm: number;
+      purchaseRate: number;
+      avgSpendNorm: number;
+      categoryDiversity: number;
+      engagementScore: number;
+    },
+    @Body('items')
+    items: Array<{
+      id: string;
+      tags?: string;
+      priceNorm: number;
+      categoryScore: number;
+      popularity: number;
+      avgRating: number;
+      recencyNorm: number;
+    }>,
+    @Body('targetTags') targetTags?: string,
+    @Body('topN') topN?: number,
+  ) {
+    return this.recommendationService.rankItemsByRelevanceAsync(
+      userFeatures ?? { ageNorm: 0.5, purchaseRate: 0.5, avgSpendNorm: 0.5, categoryDiversity: 0.5, engagementScore: 0.5 },
+      items ?? [],
+      targetTags ?? '',
+      topN ?? 10,
+    );
   }
 
   // ════════════════════════════════════════════════════════════════════════

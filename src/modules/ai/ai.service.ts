@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
-import { AIModel, ModelStatus } from './entities/ai-model.entity';
+import { AIModel, ModelStatus, ModelType } from './entities/ai-model.entity';
 import { AIInference, InferenceStatus } from './entities/ai-inference.entity';
 import { AIFeature, FeatureType } from './entities/ai-feature.entity';
 import { AIRecommendation, RecommendationType } from './entities/ai-recommendation.entity';
@@ -15,6 +15,8 @@ import { CreateInferenceDto } from './dto/create-inference.dto';
 import { GetRecommendationsDto } from './dto/get-recommendations.dto';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { CreateAIEventDto } from './dto/create-ai-event.dto';
+import { AITensorflowService } from './services/ai-tensorflow.service';
+import { AINlpService } from './services/ai-nlp.service';
 
 @Injectable()
 export class AIService {
@@ -35,6 +37,8 @@ export class AIService {
     private readonly eventRepository: Repository<AIEvent>,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
+    private readonly tfService: AITensorflowService,
+    private readonly nlpService: AINlpService,
   ) {}
 
   // ============ Model Management ============
@@ -167,14 +171,8 @@ export class AIService {
           model: response.data.model,
         };
       } else {
-        // AI_API_KEY not configured – return structured fallback so the system stays functional
-        this.logger.warn('AI_API_KEY not configured; returning fallback inference result');
-        output = {
-          content: 'AI service not configured. Please set AI_API_KEY in environment.',
-          finishReason: 'stop',
-          usage: {},
-          model: 'fallback',
-        };
+        // No external API key — route to local TF.js / NLP models
+        output = await this.runLocalInference(inference, model);
       }
 
       inference.status = InferenceStatus.COMPLETED;
@@ -193,6 +191,104 @@ export class AIService {
       inference.processingTimeMs = Date.now() - startTime;
       await this.inferenceRepository.save(inference);
     }
+  }
+
+  /**
+   * Runs inference locally using TF.js models or NLP service.
+   * Called when no external AI_API_KEY is configured.
+   *
+   * Routing priority:
+   *   1. Named TF models: fraud, pricing, discount, churn, recommendations
+   *   2. NLP-typed models: sentiment, intent, keyword, summary
+   *   3. Default: composite NLP analysis
+   */
+  private async runLocalInference(
+    inference: AIInference,
+    model: AIModel | null,
+  ): Promise<Record<string, any>> {
+    const TF_MODEL_NAMES = ['fraud', 'pricing', 'discount', 'churn', 'recommendations'];
+    const modelName = (model?.name ?? '').toLowerCase();
+    const modelType = model?.modelType as string | undefined;
+
+    // ── Extract raw input ──────────────────────────────────────────────────
+    const rawInput = inference.input;
+    const text: string =
+      typeof rawInput === 'string'
+        ? rawInput
+        : (rawInput as any)?.text ?? (rawInput as any)?.prompt ?? (rawInput as any)?.content ?? '';
+
+    const features: number[] | undefined =
+      Array.isArray((rawInput as any)?.features)
+        ? (rawInput as any).features
+        : Array.isArray(rawInput)
+        ? rawInput
+        : undefined;
+
+    // ── TF model routing ───────────────────────────────────────────────────
+    const tfMatch = TF_MODEL_NAMES.find((n) => modelName.includes(n));
+    if (tfMatch && this.tfService.isEnabled() && this.tfService.hasModel(tfMatch)) {
+      if (!features || features.length === 0) {
+        return {
+          content: `TF model "${tfMatch}" requires a features array in the input.`,
+          model: `local/tf/${tfMatch}`,
+          error: 'missing_features',
+        };
+      }
+      const tfResult = await this.tfService.predict(tfMatch, [features]);
+      return {
+        prediction: tfResult.values[0],
+        modelName: tfMatch,
+        inferenceMs: tfResult.inferenceMs,
+        model: `local/tf/${tfMatch}`,
+        source: 'tensorflow',
+      };
+    }
+
+    // ── NLP routing ────────────────────────────────────────────────────────
+    const isNlpType = modelType === ModelType?.NLP || modelType === 'nlp';
+    const isSentiment = modelName.includes('sentiment');
+    const isIntent = modelName.includes('intent');
+    const isKeyword = modelName.includes('keyword');
+    const isSummary = modelName.includes('summary') || modelName.includes('summar');
+
+    if (text) {
+      if (isSentiment || isNlpType) {
+        const sentiment = this.nlpService.analyzeSentiment(text);
+        return { ...sentiment, model: 'local/nlp/sentiment', source: 'nlp' };
+      }
+      if (isIntent) {
+        const intent = this.nlpService.detectIntent(text);
+        return { ...intent, model: 'local/nlp/intent', source: 'nlp' };
+      }
+      if (isKeyword) {
+        const keywords = this.nlpService.extractKeywords(text, 10);
+        return { keywords, model: 'local/nlp/keywords', source: 'nlp' };
+      }
+      if (isSummary) {
+        const summary = this.nlpService.summariseText(text);
+        return { summary, model: 'local/nlp/summary', source: 'nlp' };
+      }
+
+      // ── Default: composite NLP analysis ──────────────────────────────────
+      const sentiment = this.nlpService.analyzeSentiment(text);
+      const intent = this.nlpService.detectIntent(text);
+      const keywords = this.nlpService.extractKeywords(text, 5);
+      return {
+        sentiment,
+        intent,
+        keywords,
+        model: 'local/nlp/composite',
+        source: 'nlp',
+      };
+    }
+
+    // ── No usable input ────────────────────────────────────────────────────
+    this.logger.warn(`runLocalInference: no text or features found for model "${modelName}"`);
+    return {
+      content: 'Provide either a text string or a numeric features array to run local inference.',
+      model: 'local/fallback',
+      source: 'fallback',
+    };
   }
 
   async getInference(inferenceId: string): Promise<AIInference> {

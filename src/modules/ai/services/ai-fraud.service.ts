@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AITensorflowService } from './ai-tensorflow.service';
 
 export interface FraudSignal {
   name: string;
@@ -40,6 +41,8 @@ export class AIFraudService {
   private readonly MAX_DEVIATION_X = 5; // 5× a user's average = anomaly
   private readonly BLOCK_THRESHOLD = 0.85;
   private readonly REVIEW_THRESHOLD = 0.55;
+
+  constructor(private readonly tfService: AITensorflowService) {}
 
   // ─────────────────────────────────────────────────────────────────────────
   // MAIN FRAUD SCORE
@@ -128,6 +131,63 @@ export class AIFraudService {
         ? signals.map((s) => s.detail).join('; ')
         : 'No suspicious signals detected',
     };
+  }
+
+  /**
+   * TF-enhanced fraud scoring (async). Blends TF model (60%) with rule-based
+   * score (40%). Falls back to rule-based result when TF model is unavailable.
+   * Controllers should call this instead of scoreTransaction() for AI endpoints.
+   */
+  async scoreTransactionAsync(ctx: TransactionContext): Promise<FraudCheckResult> {
+    const ruleResult = this.scoreTransaction(ctx);
+
+    if (!this.tfService.isEnabled() || !this.tfService.hasModel('fraud')) {
+      return ruleResult;
+    }
+
+    const hour = new Date().getHours();
+    const avgAmount = (ctx as any).avgHistoricAmount ?? ctx.amount;
+    const recentAmounts: number[] = (ctx as any).recentAmounts ?? [];
+    const isDuplicatePattern =
+      recentAmounts.length >= 5 && new Set(recentAmounts).size <= 2;
+    const isHighRiskMethod = this.HIGH_RISK_METHODS.has(
+      ctx.paymentMethod?.toLowerCase() ?? '',
+    );
+
+    const features = [
+      Math.log(ctx.amount + 1) / Math.log(100_000),
+      Math.min(((ctx as any).recentCountInHour ?? 0) / 20, 1),
+      Math.min((avgAmount > 0 ? ctx.amount / avgAmount : 1) / 10, 1),
+      isHighRiskMethod ? 1 : 0,
+      ctx.amount % 100 === 0 && ctx.amount >= 1000 ? 1 : 0,
+      hour >= 1 && hour <= 5 ? 1 : 0,
+      isDuplicatePattern ? 1 : 0,
+    ];
+
+    try {
+      const tfResult = await this.tfService.predict('fraud', [features]);
+      const tfScore = tfResult.values[0]?.[0];
+      if (tfScore === undefined) return ruleResult;
+
+      const blendedScore = parseFloat(
+        (0.6 * tfScore + 0.4 * ruleResult.riskScore).toFixed(4),
+      );
+      const riskLevel = this.classifyRisk(blendedScore);
+
+      return {
+        ...ruleResult,
+        riskScore: blendedScore,
+        riskLevel,
+        blocked: blendedScore >= this.BLOCK_THRESHOLD,
+        reviewFlag:
+          blendedScore >= this.REVIEW_THRESHOLD &&
+          blendedScore < this.BLOCK_THRESHOLD,
+        reason: `[TF+Rule] ${ruleResult.reason}`,
+      };
+    } catch (err) {
+      this.logger.warn(`TF fraud inference failed, using rule result: ${err}`);
+      return ruleResult;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────

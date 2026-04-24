@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AIInsightsService } from './ai-insights.service';
 import { AINlpService } from './ai-nlp.service';
+import { AITensorflowService } from './ai-tensorflow.service';
 
 export interface RecommendedItem {
   id: string;
@@ -33,6 +34,7 @@ export class AIRecommendationsService {
   constructor(
     private readonly insightsService: AIInsightsService,
     private readonly nlpService: AINlpService,
+    private readonly tfService: AITensorflowService,
   ) {}
 
   // ─── Content-Based Filtering ─────────────────────────────────────────────────
@@ -276,5 +278,86 @@ export class AIRecommendationsService {
         return { id: item.id, conversionScore: score, suggestion };
       })
       .sort((a, b) => b.conversionScore - a.conversionScore);
+  }
+
+  // ─── TF-Enhanced Item Relevance Ranking ──────────────────────────────────────
+
+  /**
+   * Rank a set of items against a user profile using the TF recommendations model.
+   * Blends TF relevance (70%) with NLP tag similarity (30%) when TF is available.
+   * Falls back to pure NLP when TF is disabled or the model is not loaded.
+   *
+   * User features (5, normalised 0-1):
+   *   ageNorm, purchaseRate, avgSpendNorm, categoryDiversity, engagementScore
+   * Item features (5, normalised 0-1):
+   *   priceNorm, categoryScore, popularity, avgRating, recencyNorm
+   */
+  async rankItemsByRelevanceAsync(
+    userFeatures: {
+      ageNorm: number;          // age / 100
+      purchaseRate: number;     // monthly purchases / 20 (capped 0-1)
+      avgSpendNorm: number;     // avg monthly spend / 500 (capped 0-1)
+      categoryDiversity: number; // distinct categories / 10 (capped 0-1)
+      engagementScore: number;  // 0-1 direct
+    },
+    items: Array<{
+      id: string;
+      tags?: string;            // for NLP fallback
+      priceNorm: number;        // item_price / max_price (0-1)
+      categoryScore: number;    // 0-1
+      popularity: number;       // normalised popularity 0-1
+      avgRating: number;        // rating / 5 (0-1)
+      recencyNorm: number;      // 1 - days_since_listed / 365 (0-1)
+    }>,
+    targetTags = '',
+    topN = 10,
+  ): Promise<Array<{ id: string; score: number; reason: string }>> {
+    const userVec = [
+      Math.min(Math.max(userFeatures.ageNorm, 0), 1),
+      Math.min(Math.max(userFeatures.purchaseRate, 0), 1),
+      Math.min(Math.max(userFeatures.avgSpendNorm, 0), 1),
+      Math.min(Math.max(userFeatures.categoryDiversity, 0), 1),
+      Math.min(Math.max(userFeatures.engagementScore, 0), 1),
+    ];
+
+    const tfAvailable = this.tfService.isEnabled() && this.tfService.hasModel('recommendations');
+
+    const scored = await Promise.all(
+      items.map(async (item) => {
+        const itemVec = [
+          Math.min(Math.max(item.priceNorm, 0), 1),
+          Math.min(Math.max(item.categoryScore, 0), 1),
+          Math.min(Math.max(item.popularity, 0), 1),
+          Math.min(Math.max(item.avgRating, 0), 1),
+          Math.min(Math.max(item.recencyNorm, 0), 1),
+        ];
+
+        let tfScore = 0.5; // neutral prior
+        if (tfAvailable) {
+          try {
+            const result = await this.tfService.predict('recommendations', [[...userVec, ...itemVec]]);
+            tfScore = result.values[0]?.[0] ?? 0.5;
+          } catch (err) {
+            this.logger.warn(`TF recommendations inference failed for item ${item.id}: ${err}`);
+          }
+        }
+
+        const nlpScore = targetTags && item.tags
+          ? this.nlpService.similarity(targetTags, item.tags)
+          : 0.5;
+
+        const blendedScore = tfAvailable
+          ? parseFloat((0.7 * tfScore + 0.3 * nlpScore).toFixed(4))
+          : parseFloat(nlpScore.toFixed(4));
+
+        return {
+          id: item.id,
+          score: blendedScore,
+          reason: tfAvailable ? '[TF+NLP] relevance' : 'content similarity',
+        };
+      }),
+    );
+
+    return scored.sort((a, b) => b.score - a.score).slice(0, topN);
   }
 }

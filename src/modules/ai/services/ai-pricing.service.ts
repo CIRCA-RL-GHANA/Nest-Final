@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AITensorflowService } from './ai-tensorflow.service';
 
 export interface PricingContext {
   baseDistance: number; // km
@@ -46,7 +47,10 @@ export class AIPricingService {
   private readonly PLATFORM_FEE_PCT = 0.08; // 8%
   private readonly SPEED_KMH = 40; // average urban speed
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly tfService: AITensorflowService,
+  ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
   // SURGE MULTIPLIER
@@ -203,5 +207,176 @@ export class AIPricingService {
           ? `We value your loyalty! Enjoy ${(offerDiscount * 100).toFixed(0)}% off — just $${discountedPrice}/month for the next 3 months.`
           : 'Thank you for being a valued subscriber!',
     };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // TF-ENHANCED ASYNC METHODS (used by AI controller endpoints)
+  // Existing sync methods remain unchanged for internal service callers.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * TF-enhanced ride price computation (async). Blends TF surge (70%) with
+   * rule-based surge (30%). Falls back to rule-based when TF unavailable.
+   */
+  async computeRidePriceAsync(
+    ctx: PricingContext,
+    demandFactor = 1.0,
+    supplyFactor = 1.0,
+  ): Promise<DynamicPrice> {
+    const ruleResult = this.computeRidePrice(ctx, demandFactor, supplyFactor);
+
+    if (!this.tfService.isEnabled() || !this.tfService.hasModel('pricing')) {
+      return ruleResult;
+    }
+
+    const date = ctx.requestedAt ?? new Date();
+    const hour = date.getHours();
+    const isWeekend = [0, 6].includes(date.getDay());
+
+    const features = [
+      Math.min(demandFactor / 5, 1),
+      Math.min(supplyFactor / 5, 1),
+      Math.sin(2 * Math.PI * hour / 24),
+      Math.cos(2 * Math.PI * hour / 24),
+      isWeekend ? 1 : 0,
+    ];
+
+    try {
+      const tfResult = await this.tfService.predict('pricing', [features]);
+      const tfSurgeNorm = tfResult.values[0]?.[0];
+      if (tfSurgeNorm === undefined) return ruleResult;
+
+      const tfSurge = tfSurgeNorm * 2.5 + 1.0; // unnormalise [1.0, 3.5]
+      const blendedSurge = parseFloat(
+        Math.min(3.5, Math.max(1.0, 0.7 * tfSurge + 0.3 * ruleResult.surgeMultiplier)).toFixed(2),
+      );
+
+      const { distanceFare, timeFare } = ruleResult.breakdown;
+      const preGross = this.BASE_FARE + distanceFare + timeFare;
+      const surgeFee = parseFloat(((blendedSurge - 1.0) * preGross).toFixed(2));
+      const gross = preGross + surgeFee;
+      const platformFee = parseFloat((gross * this.PLATFORM_FEE_PCT).toFixed(2));
+      const finalPrice = parseFloat((gross + platformFee).toFixed(2));
+
+      return {
+        ...ruleResult,
+        surgeMultiplier: blendedSurge,
+        finalPrice,
+        breakdown: { ...ruleResult.breakdown, surgeFee, platformFee },
+        reason: `[TF+Rule] ${ruleResult.reason}`,
+      };
+    } catch (err) {
+      this.logger.warn(`TF pricing inference failed, using rule result: ${err}`);
+      return ruleResult;
+    }
+  }
+
+  /**
+   * TF-enhanced discount recommendation (async). Blends TF discount (70%)
+   * with rule-based discount (30%). Falls back to rule-based when TF unavailable.
+   */
+  async recommendDiscountAsync(
+    currentPrice: number,
+    daysSinceLastSale: number,
+    viewCount: number,
+    conversionRate: number,
+    stockLevel: number,
+  ): Promise<DiscountRecommendation> {
+    const ruleResult = this.recommendDiscount(
+      currentPrice, daysSinceLastSale, viewCount, conversionRate, stockLevel,
+    );
+
+    if (!this.tfService.isEnabled() || !this.tfService.hasModel('discount')) {
+      return ruleResult;
+    }
+
+    const features = [
+      Math.min(currentPrice / 1000, 1),
+      Math.min(daysSinceLastSale / 90, 1),
+      Math.min(viewCount / 500, 1),
+      Math.min(Math.max(conversionRate, 0), 1),
+      Math.min(stockLevel / 1000, 1),
+    ];
+
+    try {
+      const tfResult = await this.tfService.predict('discount', [features]);
+      const tfDiscountNorm = tfResult.values[0]?.[0];
+      if (tfDiscountNorm === undefined) return ruleResult;
+
+      const tfDiscount = tfDiscountNorm * 0.5; // unnormalise [0, 0.5]
+      const blendedDiscount = parseFloat(
+        Math.min(0.5, Math.max(0, 0.7 * tfDiscount + 0.3 * ruleResult.recommendedDiscount)).toFixed(2),
+      );
+
+      const elasticity = 1.5;
+      const volGain = blendedDiscount * elasticity;
+      const revenueLift = parseFloat(((volGain - blendedDiscount) * currentPrice).toFixed(2));
+
+      return {
+        ...ruleResult,
+        recommendedDiscount: blendedDiscount,
+        expectedRevenueLift: Math.max(0, revenueLift),
+        reason: blendedDiscount > 0 ? `[TF+Rule] ${ruleResult.reason}` : ruleResult.reason,
+      };
+    } catch (err) {
+      this.logger.warn(`TF discount inference failed, using rule result: ${err}`);
+      return ruleResult;
+    }
+  }
+
+  /**
+   * TF churn-enhanced retention discount (async). Uses TF churn probability
+   * to offer calibrated discounts. Falls back to rule-based when TF unavailable.
+   */
+  async suggestRetentionDiscountAsync(
+    monthsSubscribed: number,
+    lastLoginDaysAgo: number,
+    featureUsageScore: number,
+    currentMonthlyPrice: number,
+  ): Promise<{ offerDiscount: number; retentionProbability: number; offerMessage: string }> {
+    const ruleResult = this.suggestRetentionDiscount(
+      monthsSubscribed, lastLoginDaysAgo, featureUsageScore, currentMonthlyPrice,
+    );
+
+    if (!this.tfService.isEnabled() || !this.tfService.hasModel('churn')) {
+      return ruleResult;
+    }
+
+    const features = [
+      Math.min(monthsSubscribed / 24, 1),
+      Math.min(lastLoginDaysAgo / 30, 1),
+      Math.min(Math.max(featureUsageScore, 0), 1),
+      Math.min(currentMonthlyPrice / 50, 1),
+    ];
+
+    try {
+      const tfResult = await this.tfService.predict('churn', [features]);
+      const churnProbability = tfResult.values[0]?.[0];
+      if (churnProbability === undefined) return ruleResult;
+
+      let offerDiscount = 0;
+      if (churnProbability >= 0.7) {
+        offerDiscount = monthsSubscribed < 3 ? 0.5 : 0.3;
+      } else if (churnProbability >= 0.45) {
+        offerDiscount = 0.15;
+      }
+
+      const retentionProbability = parseFloat(
+        Math.min(0.95, 0.4 + (1 - churnProbability) * 0.55).toFixed(4),
+      );
+      const discountedPrice = (currentMonthlyPrice * (1 - offerDiscount)).toFixed(2);
+
+      return {
+        offerDiscount,
+        retentionProbability,
+        offerMessage:
+          offerDiscount > 0
+            ? `We value your loyalty! Enjoy ${(offerDiscount * 100).toFixed(0)}% off — just $${discountedPrice}/month for the next 3 months.`
+            : 'Thank you for being a valued subscriber!',
+      };
+    } catch (err) {
+      this.logger.warn(`TF churn inference failed, using rule result: ${err}`);
+      return ruleResult;
+    }
   }
 }

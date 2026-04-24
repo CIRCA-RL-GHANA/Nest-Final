@@ -1,0 +1,18 @@
+{
+  "features": [
+    "months_subscribed_norm — months_subscribed / 24  (capped 0-1)",
+    "days_since_login_norm — days_since_login / 30  (capped 0-1)",
+    "feature_usage_score — 0-1  (direct, no scaling)",
+    "monthly_price_norm — monthly_price / 50  (capped 0-1)"
+  ],
+  "output": "churn_probability [0-1]",
+  "thresholds": {
+    "high_risk": 0.70,
+    "medium_risk": 0.45
+  },
+  "architecture": "Dense(32,relu) → BatchNorm → Dropout(0.15) → Dense(16,relu) → Dense(8,relu) → Dense(1,sigmoid)",
+  "status": "placeholder — trained model produced by ml-models/train-models.js during Docker build",
+  "trained_samples": 20000,
+  "epochs": 30,
+  "typescript_snippet": "const r = await tfService.predict('churn', [[\n  Math.min(monthsSubscribed / 24, 1),\n  Math.min(lastLoginDaysAgo / 30, 1),\n  featureUsageScore,\n  Math.min(currentMonthlyPrice / 50, 1),\n]]);\nconst churnProbability = r.values[0][0]; // 0-1 (≥0.70 = high risk)"
+}

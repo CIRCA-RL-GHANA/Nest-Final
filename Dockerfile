@@ -15,11 +15,19 @@ COPY nest-cli.json ./
 # Install dependencies
 RUN npm ci
 
+# Copy ML model training script and any pre-existing model files
+COPY ml-models ./ml-models
+
 # Copy source code
 COPY src ./src
 
 # Build application
 RUN npm run build
+
+# Train & export all 5 TF.js models (fraud, pricing, recommendations, discount, churn).
+# Runs inside the builder stage where @tensorflow/tfjs-node native binary is
+# already compiled.  Output files are written back to ./ml-models/.
+RUN node ml-models/train-models.js
 
 # Prune dev dependencies so the production stage can copy node_modules directly,
 # preserving pre-compiled native binaries (bcrypt, @tensorflow/tfjs-node).
@@ -48,11 +56,14 @@ COPY --from=builder /app/node_modules ./node_modules
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy trained ML models from builder (trained during image build)
+COPY --from=builder /app/ml-models ./ml-models
+
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && adduser -S nestjs -u 1001
 
-# Create necessary directories
-RUN mkdir -p logs uploads ml-models && chown -R nestjs:nodejs /app
+# Create necessary directories (logs + uploads); ml-models already copied from builder
+RUN mkdir -p logs uploads && chown -R nestjs:nodejs /app
 
 # Switch to non-root user
 USER nestjs

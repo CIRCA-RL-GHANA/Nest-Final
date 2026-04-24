@@ -1,0 +1,25 @@
+﻿{
+  "features": [
+    "demand_factor_norm — raw_demand / 5",
+    "supply_factor_norm — raw_supply / 5",
+    "hour_sin — sin(2π × hour / 24)",
+    "hour_cos — cos(2π × hour / 24)",
+    "is_weekend — 1=Sat/Sun"
+  ],
+  "output": "surge_norm [0-1]",
+  "rescale": "surge_multiplier = output × 2.5 + 1.0  →  range [1.0, 3.5]",
+  "architecture": "Dense(32,relu) → BatchNorm → Dense(16,relu) → Dense(8,relu) → Dense(1,sigmoid)",
+  "status": "placeholder — trained model produced by ml-models/train-models.js during Docker build",
+  "typescript_snippet": "const r = await tfService.predict('pricing', [[demandFactor/5, supplyFactor/5, Math.sin(2*Math.PI*hour/24), Math.cos(2*Math.PI*hour/24), isWeekend?1:0]]);\nconst surgeMultiplier = r.values[0][0] * 2.5 + 1.0; // 1.0–3.5"
+}
+    "output":  "surge_norm [0-1]",
+    "inputs":  [
+                   "demand_factor_norm",
+                   "supply_factor_norm",
+                   "hour_sin",
+                   "hour_cos",
+                   "is_weekend"
+               ],
+    "note":  "PLACEHOLDER - run build_models.py to train",
+    "rescale":  "surge = output*2.5+1.0 -\u003e [1.0,3.5]"
+}

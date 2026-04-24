@@ -56,7 +56,11 @@ docker-compose*.yml
 # Uploads & logs (mounted as volumes)
 uploads/*
 logs/*
-ml-models/*
+# Exclude pre-built model binaries (regenerated during Docker build via train-models.js)
+ml-models/**/*.bin
+ml-models/**/*.json
+# Allow the training script itself
+!ml-models/train-models.js
 
 # Temp
 .tmp

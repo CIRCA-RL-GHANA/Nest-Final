@@ -43,9 +43,12 @@ lerna-debug.log*
 /uploads/*
 !/uploads/.gitkeep
 
-# ML Models
-/ml-models/*
+# ML Models — ignore compiled weights; track scripts, docs, and placeholder
+/ml-models/**/*.bin
+/ml-models/**/model.json
+!/ml-models/train-models.js
 !/ml-models/.gitkeep
+!/ml-models/*/features.json
 
 # Temp
 *.swp

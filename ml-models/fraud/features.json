@@ -1,0 +1,16 @@
+﻿{
+  "features": [
+    "amount_log_norm — log(amount+1) / log(100000)",
+    "hourly_count_norm — recent_txn_count / 20",
+    "amount_vs_avg_norm — (txn_amount / user_avg, capped 10) / 10",
+    "is_high_risk_method — 1=virtual_card/prepaid/gift_card",
+    "is_round_number — 1=amount%100==0 AND amount>=1000",
+    "is_late_night — 1=hour in [1,5]",
+    "is_duplicate_amounts — 1=last 5 identical"
+  ],
+  "output": "fraud_probability [0-1]",
+  "thresholds": { "block": 0.85, "review": 0.55 },
+  "architecture": "Dense(32,relu) → BatchNorm → Dropout(0.2) → Dense(16,relu) → Dense(8,relu) → Dense(1,sigmoid)",
+  "status": "placeholder — trained model produced by ml-models/train-models.js during Docker build",
+  "typescript_snippet": "const r = await tfService.predict('fraud', [[amountLogNorm, hourlyCountNorm, amountVsAvgNorm, isHighRiskMethod, isRoundNumber, isLateNight, isDuplicateAmounts]]);\nconst fraudProbability = r.values[0][0]; // 0-1"
+}
