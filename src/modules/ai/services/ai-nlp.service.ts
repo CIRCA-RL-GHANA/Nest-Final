@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AITensorflowService } from './ai-tensorflow.service';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const natural = require('natural');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -54,7 +55,13 @@ export class AINlpService {
   private readonly analyzer = new natural.SentimentAnalyzer('English', this.stemmer, 'afinn');
   private tfidfEngine: any;
 
-  constructor() {
+  /** Ordered class labels used by the NLU TF.js model (indices 0-11). */
+  private static readonly NLU_CLASSES = [
+    'buy', 'sell', 'ride', 'search', 'help', 'pricing',
+    'payment', 'social', 'schedule', 'complaint', 'recommendation', 'unknown',
+  ] as const;
+
+  constructor(private readonly tfService: AITensorflowService) {
     this.tfidfEngine = new natural.TfIdf();
   }
 
@@ -125,6 +132,97 @@ export class AINlpService {
       subIntent:
         sorted[1]?.[0] !== topIntent && (sorted[1]?.[1] ?? 0) > 0 ? sorted[1]?.[0] : undefined,
     };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // NLU FEATURE VECTOR (used by TF.js NLU model)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Convert raw text to a 14-dimensional feature vector for the NLU TF.js model.
+   *
+   * Features 0-10 : normalised keyword match scores for each intent category
+   *                 (same 11 categories as INTENT_PATTERNS, same order as NLU_CLASSES)
+   * Feature 11    : is_question — has '?' or starts with interrogative word
+   * Feature 12    : has_amount  — contains at least one digit
+   * Feature 13    : is_negation — contains a negation word
+   *
+   * Public so that external callers (e.g. scripts, tests) can inspect the vector.
+   */
+  textToNluVector(text: string): number[] {
+    const lower = text.toLowerCase();
+    const intentKeys = Object.keys(INTENT_PATTERNS);
+    const scores = intentKeys.map((intent) => {
+      const keywords = INTENT_PATTERNS[intent];
+      const matchCount = keywords.reduce((acc, kw) => acc + (lower.includes(kw) ? 1 : 0), 0);
+      return Math.min(1, matchCount / Math.max(1, keywords.length));
+    });
+
+    const isQuestion =
+      lower.includes('?') || /^(how|what|where|when|why|who|which)\b/.test(lower) ? 1 : 0;
+    const hasAmount = /\d/.test(lower) ? 1 : 0;
+    const isNegation = /\b(no|not|don't|dont|can't|cant|never|without)\b/.test(lower) ? 1 : 0;
+
+    return [...scores, isQuestion, hasAmount, isNegation]; // 14-D
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ENHANCED INTENT DETECTION (uses NLU TF.js model when available)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Async intent detection that uses the NLU TF.js model when TF is enabled
+   * and the 'nlu' model is loaded.  Falls back to keyword-based detectIntent()
+   * when TF is disabled or the model is not present — zero breaking change for
+   * existing synchronous callers.
+   */
+  async detectIntentEnhanced(text: string): Promise<IntentResult> {
+    if (this.tfService.isEnabled() && this.tfService.hasModel('nlu')) {
+      try {
+        const vector = this.textToNluVector(text.toLowerCase().trim());
+        const result = await this.tfService.predict('nlu', [vector]);
+
+        if (result.values.length > 0) {
+          const probs  = result.values[0]; // 12 class probabilities
+          const topIdx = probs.indexOf(Math.max(...probs));
+          const topProb = probs[topIdx] ?? 0;
+          const classes = AINlpService.NLU_CLASSES;
+          const topIntent = classes[topIdx] ?? 'unknown';
+
+          // Extract entities the same way as the keyword path
+          const doc      = nlp(text);
+          const entities: IntentResult['entities'] = [];
+          doc.people().out('array').forEach((v: string) => entities.push({ type: 'person', value: v }));
+          doc.places().out('array').forEach((v: string) => entities.push({ type: 'place', value: v }));
+          doc.values().out('array').forEach((v: string) => entities.push({ type: 'quantity', value: v }));
+          doc.money().out('array').forEach((v: string) => entities.push({ type: 'money', value: v }));
+
+          // Second-best class as subIntent (if its probability is non-trivial)
+          const sortedProbs = [...probs].map((p, i) => ({ p, i })).sort((a, b) => b.p - a.p);
+          const second = sortedProbs[1];
+          const subIntent =
+            second && second.i !== topIdx && second.p > 0.1
+              ? (classes[second.i] ?? undefined)
+              : undefined;
+
+          this.logger.debug(`NLU TF: "${topIntent}" (${(topProb * 100).toFixed(1)}%)`);
+
+          return {
+            intent: topIntent,
+            confidence: parseFloat(Math.min(1, topProb).toFixed(4)),
+            entities,
+            subIntent,
+          };
+        }
+      } catch (err: unknown) {
+        this.logger.warn(
+          `NLU TF prediction failed: ${err instanceof Error ? err.message : String(err)} — using keyword fallback`,
+        );
+      }
+    }
+
+    // Fallback: synchronous keyword-based detection
+    return this.detectIntent(text);
   }
 
   // ─────────────────────────────────────────────────────────────────────────

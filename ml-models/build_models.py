@@ -518,11 +518,193 @@ def build_discount_model() -> tf.keras.Model:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# MODEL 5 — SUBSCRIPTION CHURN PREDICTION
+# ══════════════════════════════════════════════════════════════════════════════
+# Feature vector (4):
+#   0  months_subscribed_norm  months_subscribed / 24  (capped 0-1)
+#   1  days_since_login_norm   days_since_login / 30   (capped 0-1)
+#   2  feature_usage_score     0-1 (direct, no scaling)
+#   3  monthly_price_norm      monthly_price / 50      (capped 0-1)
+# Output: churn_probability [0-1]
+# Thresholds: high_risk ≥ 0.70, medium_risk ≥ 0.45
+# Mirrors suggestRetentionDiscount() churn risk logic in ai-pricing.service.ts
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_churn_model() -> tf.keras.Model:
+    _header("MODEL 5 / 6 — Subscription Churn Prediction")
+
+    n = N_SAMPLES
+
+    months_norm     = np.random.beta(2, 3, n)
+    login_days_norm = np.minimum(np.random.exponential(0.15, n), 1.0)
+    usage_score     = np.random.beta(2, 5, n)
+    price_norm      = np.random.beta(1.5, 4, n)
+
+    X = np.column_stack([months_norm, login_days_norm, usage_score, price_norm])
+
+    last_login_days = login_days_norm * 30
+    months_sub      = months_norm * 24
+
+    churn_risk = (
+        np.where(last_login_days > 14, 0.3, 0.0) +
+        np.where(usage_score < 0.3, 0.25, 0.0) +
+        np.where(months_sub < 3, 0.2, 0.0) +
+        np.where(price_norm > 0.8, 0.1, 0.0)
+    )
+    y = np.clip(churn_risk + np.random.normal(0, 0.05, n), 0, 1)
+
+    high_risk = int((y >= 0.70).sum())
+    med_risk  = int(((y >= 0.45) & (y < 0.70)).sum())
+    print(f"  Samples   : {n:,}   ({high_risk:,} high-risk  /  {med_risk:,} medium  /  {n - high_risk - med_risk:,} low)")
+
+    model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(4,), name='churn_input'),
+        tf.keras.layers.Dense(32, activation='relu'),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.Dropout(0.15),
+        tf.keras.layers.Dense(16, activation='relu'),
+        tf.keras.layers.Dense(8,  activation='relu'),
+        tf.keras.layers.Dense(1,  activation='sigmoid', name='churn_probability'),
+    ], name='churn')
+
+    model.compile(optimizer=tf.keras.optimizers.Adam(0.001), loss='mse', metrics=['mae'])
+    model.fit(X, y, epochs=EPOCHS, batch_size=BATCH_SIZE, validation_split=0.15, verbose=0)
+    loss, mae = model.evaluate(X, y, verbose=0)
+    print(f"  Results   : MSE={loss:.5f}  MAE={mae:.4f}")
+
+    out_dir = _export_model(model, 'churn')
+    _write_features(out_dir, 'churn', {
+        "features": [
+            "months_subscribed_norm — months_subscribed / 24  (capped 0-1)",
+            "days_since_login_norm — days_since_login / 30  (capped 0-1)",
+            "feature_usage_score — 0-1  (direct, no scaling)",
+            "monthly_price_norm — monthly_price / 50  (capped 0-1)",
+        ],
+        "output": "churn_probability [0-1]",
+        "thresholds": {"high_risk": 0.70, "medium_risk": 0.45},
+        "architecture": "Dense(32,relu) → BatchNorm → Dropout(0.15) → Dense(16,relu) → Dense(8,relu) → Dense(1,sigmoid)",
+        "typescript_snippet": (
+            "const r = await tfService.predict('churn', [[\n"
+            "  Math.min(monthsSubscribed / 24, 1),\n"
+            "  Math.min(lastLoginDaysAgo / 30, 1),\n"
+            "  featureUsageScore,\n"
+            "  Math.min(currentMonthlyPrice / 50, 1),\n"
+            "]]);\n"
+            "const churnProbability = r.values[0][0]; // 0-1 (≥0.70 = high risk)"
+        ),
+    })
+    return model
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODEL 6 — NLU INTENT CLASSIFIER
+# ══════════════════════════════════════════════════════════════════════════════
+# Feature vector (14):
+#   0-10  keyword match scores (normalised 0-1) for each intent category:
+#           buy, sell, ride, search, help, pricing, payment, social,
+#           schedule, complaint, recommendation
+#  11  is_question   — text has '?' or starts with how/what/where/when/why
+#  12  has_amount    — text contains a digit
+#  13  is_negation   — text contains no/not/don't/can't/never
+# Output: softmax probs over 12 classes
+# Classes: buy, sell, ride, search, help, pricing, payment, social,
+#          schedule, complaint, recommendation, unknown
+# Mirrors keyword-scoring logic in AINlpService.detectIntent()
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_nlu_model() -> tf.keras.Model:
+    _header("MODEL 6 / 6 — NLU Intent Classifier (14 inputs → 12 classes)")
+
+    N_FEATURES = 14
+    N_CLASSES  = 12
+    n = N_SAMPLES
+
+    X = np.zeros((n, N_FEATURES), dtype=np.float32)
+    Y = np.zeros((n, N_CLASSES),  dtype=np.float32)  # one-hot labels
+
+    classes = np.random.randint(0, N_CLASSES, size=n)
+
+    for i in range(n):
+        c = int(classes[i])
+        for k in range(11):
+            if c == k:
+                X[i, k] = float(np.random.uniform(0.55, 1.0))
+            elif c == 11:
+                X[i, k] = float(np.random.uniform(0.0, 0.18))
+            else:
+                X[i, k] = float(np.random.uniform(0.0, 0.35)
+                                 if np.random.random() < 0.12
+                                 else np.random.uniform(0.0, 0.12))
+
+        q_bias = 0.55 if c in (3, 5) else 0.18
+        a_bias = 0.50 if c in (0, 5, 6) else 0.20
+        ng_bias = 0.45 if c == 9 else 0.08
+        X[i, 11] = 1.0 if np.random.random() < q_bias  else 0.0
+        X[i, 12] = 1.0 if np.random.random() < a_bias  else 0.0
+        X[i, 13] = 1.0 if np.random.random() < ng_bias else 0.0
+
+        Y[i, c] = 1.0
+
+    print(f"  Samples   : {n:,}   ({N_CLASSES} classes, ~{n // N_CLASSES:,} each)")
+
+    model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(N_FEATURES,), name='nlu_input'),
+        tf.keras.layers.Dense(64, activation='relu'),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.Dropout(0.25),
+        tf.keras.layers.Dense(32, activation='relu'),
+        tf.keras.layers.Dense(16, activation='relu'),
+        tf.keras.layers.Dense(N_CLASSES, activation='softmax', name='intent_probs'),
+    ], name='nlu')
+
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(0.001),
+        loss='categorical_crossentropy',
+        metrics=['accuracy'],
+    )
+
+    model.fit(X, Y, epochs=EPOCHS, batch_size=BATCH_SIZE, validation_split=0.15, verbose=0)
+    loss, acc = model.evaluate(X, Y, verbose=0)
+    print(f"  Results   : loss={loss:.4f}  accuracy={acc:.4f}")
+
+    out_dir = _export_model(model, 'nlu')
+    _write_features(out_dir, 'nlu', {
+        "features": [
+            "buy_score — normalised keyword match for buy/purchase/order intents [0-1]",
+            "sell_score — normalised keyword match for sell/list/upload intents [0-1]",
+            "ride_score — normalised keyword match for ride/taxi/transport intents [0-1]",
+            "search_score — normalised keyword match for search/find/show me intents [0-1]",
+            "help_score — normalised keyword match for help/support/how do intents [0-1]",
+            "pricing_score — normalised keyword match for price/cost/how much intents [0-1]",
+            "payment_score — normalised keyword match for pay/wallet/transfer intents [0-1]",
+            "social_score — normalised keyword match for chat/message/share intents [0-1]",
+            "schedule_score — normalised keyword match for book/schedule/calendar intents [0-1]",
+            "complaint_score — normalised keyword match for complaint/issue/refund intents [0-1]",
+            "recommendation_score — normalised keyword match for recommend/suggest/best intents [0-1]",
+            "is_question — 1 if text has ? or starts with how/what/where/when/why [0-1]",
+            "has_amount — 1 if text contains a digit [0-1]",
+            "is_negation — 1 if text contains no/not/don't/can't/never [0-1]",
+        ],
+        "output": "softmax class probabilities [0-1 each, sum=1]",
+        "classes": ["buy", "sell", "ride", "search", "help", "pricing",
+                    "payment", "social", "schedule", "complaint", "recommendation", "unknown"],
+        "architecture": "Dense(64,relu) → BatchNorm → Dropout(0.25) → Dense(32,relu) → Dense(16,relu) → Dense(12,softmax)",
+        "typescript_snippet": (
+            "const vec = nlpService.textToNluVector(text); // 14-D\n"
+            "const r = await tfService.predict('nlu', [vec]);\n"
+            "const CLASSES = ['buy','sell','ride','search','help','pricing','payment',"
+            "'social','schedule','complaint','recommendation','unknown'];\n"
+            "const intent = CLASSES[r.values[0].indexOf(Math.max(...r.values[0]))];"
+        ),
+    })
+    return model
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
-    global EPOCHS, N_SAMPLES
 
     parser = argparse.ArgumentParser(
         description='Build and export all PROMPT Genie TF.js ML models',
@@ -545,18 +727,20 @@ def main() -> None:
     print(f"  Samples/model: {N_SAMPLES:,}")
     print(f"  Epochs/model : {EPOCHS}")
 
-    # ── Train & export all four models ──────────────────────────────────────
+    # ── Train & export all six models ───────────────────────────────────────
     build_fraud_model()
     build_pricing_model()
     build_recommendations_model()
     build_discount_model()
+    build_churn_model()
+    build_nlu_model()
 
     # ── Verify exports ──────────────────────────────────────────────────────
     _header("Verifying exports")
     all_ok = True
-    for name in ('fraud', 'pricing', 'recommendations', 'discount'):
-        path   = os.path.join(SCRIPT_DIR, name, 'model.json')
-        exists = os.path.exists(path)
+    for name in ('fraud', 'pricing', 'recommendations', 'discount', 'churn', 'nlu'):
+        mpath  = os.path.join(SCRIPT_DIR, name, 'model.json')
+        exists = os.path.exists(mpath)
         print(f"  {'✓' if exists else '✗ MISSING'}  ml-models/{name}/model.json")
         if not exists:
             all_ok = False
@@ -572,7 +756,8 @@ def main() -> None:
 
     # ── Done ────────────────────────────────────────────────────────────────
     _header("All done")
-    print("""  4 models built, exported, and activated.
+    print("""  6 models built, exported, and activated.
+  Models: fraud, pricing, recommendations, discount, churn, nlu
 
   Restart the backend to load them:
     docker-compose restart api
@@ -581,11 +766,11 @@ def main() -> None:
 
   On startup AITensorflowService will log:
     TensorFlow.js x.x.x (tfjs-node CPU) initialised
-    TensorFlow: 4 model(s) preloaded from "./ml-models"
+    TensorFlow: 6 model(s) preloaded from "./ml-models"
 
   Next steps:
-    1. Wire predict() calls into ai-fraud.service.ts, ai-pricing.service.ts, etc.
-       using the TypeScript snippets in each features.json.
+    1. Wire predict() calls into AI services using the TypeScript snippets
+       in each features.json.
     2. Once you have real labelled data, re-run this script — it will overwrite
        the synthetic models with trained versions.
     3. To retrain a single model, comment out the others in main().

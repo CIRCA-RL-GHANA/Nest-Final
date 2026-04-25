@@ -1,0 +1,36 @@
+﻿{
+    "features":  [
+                     "buy_score — normalised keyword match for buy/purchase/order intents [0-1]",
+                     "sell_score — normalised keyword match for sell/list/upload intents [0-1]",
+                     "ride_score — normalised keyword match for ride/taxi/transport intents [0-1]",
+                     "search_score — normalised keyword match for search/find/show me intents [0-1]",
+                     "help_score — normalised keyword match for help/support/how do intents [0-1]",
+                     "pricing_score — normalised keyword match for price/cost/how much intents [0-1]",
+                     "payment_score — normalised keyword match for pay/wallet/transfer intents [0-1]",
+                     "social_score — normalised keyword match for chat/message/share intents [0-1]",
+                     "schedule_score — normalised keyword match for book/schedule/calendar intents [0-1]",
+                     "complaint_score — normalised keyword match for complaint/issue/refund intents [0-1]",
+                     "recommendation_score — normalised keyword match for recommend/suggest/best intents [0-1]",
+                     "is_question — 1 if text contains ? or starts with how/what/where/when/why [0-1]",
+                     "has_amount — 1 if text contains a digit [0-1]",
+                     "is_negation — 1 if text contains no/not/don\u0027t/can\u0027t/never [0-1]"
+                 ],
+    "note":  "PLACEHOLDER - run train-models.js to train",
+    "output":  "softmax probs over 12 classes [0-1 each, sum=1]",
+    "architecture":  "Dense(64,relu) -\u003e BatchNorm -\u003e Dropout(0.25) -\u003e Dense(32,relu) -\u003e Dense(16,relu) -\u003e Dense(12,softmax)",
+    "classes":  [
+                    "buy",
+                    "sell",
+                    "ride",
+                    "search",
+                    "help",
+                    "pricing",
+                    "payment",
+                    "social",
+                    "schedule",
+                    "complaint",
+                    "recommendation",
+                    "unknown"
+                ],
+    "typescript_snippet":  "const r = await tfService.predict(\u0027nlu\u0027, [[...14DVector]]);"
+}

@@ -394,10 +394,10 @@ export class AIController {
 
   @Post('nlp/intent')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Detect user intent and extract entities from text' })
+  @ApiOperation({ summary: 'Detect user intent and extract entities from text (NLU model enhanced when TF enabled)' })
   @ApiBody({ schema: { properties: { text: { type: 'string' } } } })
   detectIntent(@Body('text') text: string) {
-    return this.nlpService.detectIntent(text ?? '');
+    return this.nlpService.detectIntentEnhanced(text ?? '');
   }
 
   @Post('nlp/keywords')

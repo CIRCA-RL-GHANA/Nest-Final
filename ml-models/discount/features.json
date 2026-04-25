@@ -1,15 +1,12 @@
 ﻿{
-  "features": [
-    "current_price_norm — price / 1000  (capped 0-1)",
-    "days_since_last_sale_norm — days / 90  (capped 0-1)",
-    "view_count_norm — views / 500  (capped 0-1)",
-    "conversion_rate — 0-1  (no scaling)",
-    "stock_level_norm — stock / 1000  (capped 0-1)"
-  ],
-  "output": "discount_norm [0-1]",
-  "rescale": "recommended_discount = output × 0.5  →  range [0%, 50%]",
-  "architecture": "Dense(32,relu) → BatchNorm → Dense(16,relu) → Dense(8,relu) → Dense(1,sigmoid)",
-  "status": "placeholder — trained model produced by ml-models/train-models.js during Docker build",
-  "typescript_snippet": "const r = await tfService.predict('discount', [[Math.min(price/1000,1), Math.min(daysSinceLastSale/90,1), Math.min(viewCount/500,1), conversionRate, Math.min(stockLevel/1000,1)]]);\nconst recommendedDiscount = r.values[0][0] * 0.5; // 0.0–0.50"
-}
+    "output":  "discount_norm [0-1]",
+    "inputs":  [
+                   "current_price_norm",
+                   "days_since_last_sale_norm",
+                   "view_count_norm",
+                   "conversion_rate",
+                   "stock_level_norm"
+               ],
+    "note":  "PLACEHOLDER - run build_models.py to train",
+    "rescale":  "discount = output*0.5 -\u003e [0%,50%]"
 }

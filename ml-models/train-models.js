@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 'use strict';
 /**
  * PROMPT Genie — ML Model Training Script (Node.js / tfjs-node)
@@ -161,7 +161,7 @@ async function saveModel(model, name) {
 // MODEL 1 — FRAUD DETECTION
 // ══════════════════════════════════════════════════════════════════════════
 async function buildFraud() {
-  header('MODEL 1 / 5 — Fraud Detection');
+  header('MODEL 1 / 6 — Fraud Detection');
 
   const n = N_SAMPLES;
 
@@ -267,7 +267,7 @@ async function buildFraud() {
 // MODEL 2 — DYNAMIC SURGE PRICING
 // ══════════════════════════════════════════════════════════════════════════
 async function buildPricing() {
-  header('MODEL 2 / 5 — Dynamic Surge Pricing');
+  header('MODEL 2 / 6 — Dynamic Surge Pricing');
 
   const n = N_SAMPLES;
 
@@ -378,7 +378,7 @@ async function buildPricing() {
 // MODEL 3 — RECOMMENDATIONS (user–item relevance)
 // ══════════════════════════════════════════════════════════════════════════
 async function buildRecommendations() {
-  header('MODEL 3 / 5 — Recommendations (User–Item Relevance)');
+  header('MODEL 3 / 6 — Recommendations (User–Item Relevance)');
 
   const n = N_SAMPLES;
 
@@ -477,7 +477,7 @@ async function buildRecommendations() {
 // MODEL 4 — DISCOUNT OPTIMISATION
 // ══════════════════════════════════════════════════════════════════════════
 async function buildDiscount() {
-  header('MODEL 4 / 5 — Discount Optimisation');
+  header('MODEL 4 / 6 — Discount Optimisation');
 
   const n = N_SAMPLES;
 
@@ -580,7 +580,7 @@ async function buildDiscount() {
 // Mirrors suggestRetentionDiscount() churn risk logic in ai-pricing.service.ts
 // ══════════════════════════════════════════════════════════════════════════
 async function buildChurn() {
-  header('MODEL 5 / 5 — Subscription Churn Prediction');
+  header('MODEL 5 / 6 — Subscription Churn Prediction');
 
   const n = N_SAMPLES;
 
@@ -678,6 +678,140 @@ async function buildChurn() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
+// MODEL 6 — NLU INTENT CLASSIFIER
+// ══════════════════════════════════════════════════════════════════════════
+// Feature vector (14):
+//   0-10  keyword match scores (normalised 0-1) for each intent category:
+//          buy, sell, ride, search, help, pricing, payment, social,
+//          schedule, complaint, recommendation
+//  11  is_question   — text has '?' or starts with how/what/where/when/why
+//  12  has_amount    — text contains a digit
+//  13  is_negation   — text contains no/not/don't/can't/never
+// Output: softmax probs over 12 classes [buy,sell,ride,search,help,pricing,
+//          payment,social,schedule,complaint,recommendation,unknown]
+// Mirrors keyword-scoring logic in AINlpService.detectIntent()
+// ══════════════════════════════════════════════════════════════════════════
+async function buildNlu() {
+  header('MODEL 6 / 6 — NLU Intent Classifier (14 inputs → 12 classes)');
+
+  const N_FEATURES = 14;
+  const N_CLASSES  = 12;
+  const INTENT_MAX_KW = [8, 5, 7, 6, 6, 8, 7, 7, 7, 8, 7]; // keyword count per class
+  const n = N_SAMPLES;
+
+  const X = new Float32Array(n * N_FEATURES);
+  const y = new Float32Array(n * N_CLASSES); // one-hot
+
+  for (let i = 0; i < n; i++) {
+    // Pick a target class uniformly (0-11)
+    const classIdx = Math.floor(rand() * N_CLASSES);
+
+    // ── Keyword match scores (features 0-10) ───────────────────────────
+    for (let k = 0; k < 11; k++) {
+      if (classIdx === k) {
+        // Strong match on target class (0.55-1.0)
+        X[i * N_FEATURES + k] = 0.55 + rand() * 0.45;
+      } else if (classIdx === 11) {
+        // 'unknown' → all low scores (0-0.18)
+        X[i * N_FEATURES + k] = rand() * 0.18;
+      } else {
+        // Non-target classes: mostly low, occasional mild overlap
+        X[i * N_FEATURES + k] = rand() < 0.12 ? rand() * 0.35 : rand() * 0.12;
+      }
+    }
+
+    // ── Linguistic features (11-13) ────────────────────────────────────
+    // is_question: higher for search(3) and pricing(5)
+    const qBias = (classIdx === 3 || classIdx === 5) ? 0.55 : 0.18;
+    X[i * N_FEATURES + 11] = rand() < qBias ? 1.0 : 0.0;
+
+    // has_amount: higher for buy(0), pricing(5), payment(6)
+    const aBias = (classIdx === 0 || classIdx === 5 || classIdx === 6) ? 0.50 : 0.20;
+    X[i * N_FEATURES + 12] = rand() < aBias ? 1.0 : 0.0;
+
+    // is_negation: higher for complaint(9)
+    const nBias = classIdx === 9 ? 0.45 : 0.08;
+    X[i * N_FEATURES + 13] = rand() < nBias ? 1.0 : 0.0;
+
+    // ── One-hot label ──────────────────────────────────────────────────
+    y[i * N_CLASSES + classIdx] = 1.0;
+  }
+
+  const classCounts = new Array(N_CLASSES).fill(0);
+  for (let i = 0; i < n; i++) {
+    for (let c = 0; c < N_CLASSES; c++) {
+      if (y[i * N_CLASSES + c] === 1.0) { classCounts[c]++; break; }
+    }
+  }
+  console.log(`  Samples   : ${n.toLocaleString()}   (${N_CLASSES} classes, ~${Math.round(n / N_CLASSES)} each)`);
+
+  const model = tf.sequential({ name: 'nlu' });
+  model.add(tf.layers.dense({ units: 64, activation: 'relu', inputShape: [N_FEATURES], name: 'dense' }));
+  model.add(tf.layers.batchNormalization());
+  model.add(tf.layers.dropout({ rate: 0.25 }));
+  model.add(tf.layers.dense({ units: 32, activation: 'relu', name: 'dense_1' }));
+  model.add(tf.layers.dense({ units: 16, activation: 'relu', name: 'dense_2' }));
+  model.add(tf.layers.dense({ units: N_CLASSES, activation: 'softmax', name: 'intent_probs' }));
+  model.compile({
+    optimizer: tf.train.adam(0.001),
+    loss: 'categoricalCrossentropy',
+    metrics: ['accuracy'],
+  });
+
+  const xT = tf.tensor2d(X, [n, N_FEATURES]);
+  const yT = tf.tensor2d(y, [n, N_CLASSES]);
+  const t0 = performance.now();
+  const history = await model.fit(xT, yT, {
+    epochs: EPOCHS,
+    batchSize: BATCH_SIZE,
+    validationSplit: 0.15,
+    verbose: 0,
+  });
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+  const lastEpoch = history.history;
+  const finalLoss = lastEpoch.loss[lastEpoch.loss.length - 1].toFixed(4);
+  const finalAcc  = lastEpoch.acc
+    ? lastEpoch.acc[lastEpoch.acc.length - 1].toFixed(4)
+    : (lastEpoch.accuracy?.[lastEpoch.accuracy.length - 1] ?? 0).toFixed(4);
+  console.log(`  Results   : loss=${finalLoss}  accuracy=${finalAcc}  time=${elapsed}s`);
+  xT.dispose(); yT.dispose();
+
+  const outDir = await saveModel(model, 'nlu');
+  model.dispose();
+
+  writeFeatures(outDir, 'nlu', {
+    features: [
+      'buy_score — normalised keyword match for buy/purchase/order intents [0-1]',
+      'sell_score — normalised keyword match for sell/list/upload intents [0-1]',
+      'ride_score — normalised keyword match for ride/taxi/transport intents [0-1]',
+      'search_score — normalised keyword match for search/find/show me intents [0-1]',
+      'help_score — normalised keyword match for help/support/how do intents [0-1]',
+      'pricing_score — normalised keyword match for price/cost/how much intents [0-1]',
+      'payment_score — normalised keyword match for pay/wallet/transfer intents [0-1]',
+      'social_score — normalised keyword match for chat/message/share intents [0-1]',
+      'schedule_score — normalised keyword match for book/schedule/calendar intents [0-1]',
+      'complaint_score — normalised keyword match for complaint/issue/refund intents [0-1]',
+      'recommendation_score — normalised keyword match for recommend/suggest/best intents [0-1]',
+      'is_question — 1 if text has ? or starts with how/what/where/when/why [0-1]',
+      'has_amount — 1 if text contains a digit [0-1]',
+      'is_negation — 1 if text contains no/not/don\'t/can\'t/never [0-1]',
+    ],
+    output: 'softmax class probabilities [0-1 each, sum=1]',
+    classes: ['buy', 'sell', 'ride', 'search', 'help', 'pricing', 'payment',
+              'social', 'schedule', 'complaint', 'recommendation', 'unknown'],
+    architecture: 'Dense(64,relu) → BatchNorm → Dropout(0.25) → Dense(32,relu) → Dense(16,relu) → Dense(12,softmax)',
+    trained_samples: n,
+    epochs: EPOCHS,
+    note: 'Feature vector built by AINlpService.textToNluVector(text). Falls back to keyword scoring when TF disabled.',
+    typescript_snippet:
+      "const vec = nlpService.textToNluVector(text); // 14-D\n" +
+      "const r = await tfService.predict('nlu', [vec]);\n" +
+      "const CLASSES = ['buy','sell','ride','search','help','pricing','payment','social','schedule','complaint','recommendation','unknown'];\n" +
+      "const intent = CLASSES[r.values[0].indexOf(Math.max(...r.values[0]))];",
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 // MAIN
 // ══════════════════════════════════════════════════════════════════════════
 async function main() {
@@ -697,13 +831,14 @@ async function main() {
   await buildRecommendations();
   await buildDiscount();
   await buildChurn();
+  await buildNlu();
 
   const totalSec = ((performance.now() - t0) / 1000).toFixed(1);
 
   // Verify all outputs
   console.log('\n── Verification ──────────────────────────────────────────');
   let ok = true;
-  for (const name of ['fraud', 'pricing', 'recommendations', 'discount', 'churn']) {
+  for (const name of ['fraud', 'pricing', 'recommendations', 'discount', 'churn', 'nlu']) {
     const mj = path.join(ML_DIR, name, 'model.json');
     const fj = path.join(ML_DIR, name, 'features.json');
     const mjOk = fs.existsSync(mj);
@@ -718,7 +853,8 @@ async function main() {
   }
 
   console.log(`\n${bar}`);
-  console.log(`  COMPLETE — 5 models trained & exported in ${totalSec}s`);
+  console.log(`  COMPLETE — 6 models trained & exported in ${totalSec}s`);
+  console.log('  Models: fraud, pricing, recommendations, discount, churn, nlu');
   console.log('  Backend will auto-load models on next restart.');
   console.log('  Restart: docker-compose restart api  |  npm run start:dev');
   console.log(`${bar}\n`);
