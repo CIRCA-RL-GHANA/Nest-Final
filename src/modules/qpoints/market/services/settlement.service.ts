@@ -1,4 +1,4 @@
-import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -7,7 +7,6 @@ import {
   SettlementType,
 } from '../entities/q-point-settlement.entity';
 import { QPointTrade } from '../entities/q-point-trade.entity';
-import { PaymentFacilitatorService } from './payment-facilitator.service';
 import { MarketNotificationService } from './market-notification.service';
 
 @Injectable()
@@ -17,13 +16,24 @@ export class SettlementService {
   constructor(
     @InjectRepository(QPointSettlement)
     private readonly repo: Repository<QPointSettlement>,
-    private readonly facilitator: PaymentFacilitatorService,
     private readonly notifications: MarketNotificationService,
   ) {}
 
   /**
-   * Initiate cash settlement for a completed trade.
-   * Creates two records (debit buyer, credit seller) and calls the facilitator.
+   * Record a pending cash settlement for a completed trade.
+   *
+   * COMPLIANCE — TOS §4.3 & §2.3:
+   *   "The Company does not initiate, facilitate, or confirm fiat transfers."
+   *   "The Platform merely records the Q Points transfer; the fiat transfer is
+   *    handled solely by the Facilitator."
+   *
+   * The Platform creates PENDING settlement records for audit purposes ONLY.
+   * It does NOT call the Facilitator's transfer API.  Actual fiat movement
+   * occurs directly between the Users through their registered Facilitator
+   * accounts — outside this Platform.  Settlement records are marked COMPLETED
+   * when the Facilitator sends a confirmation webhook to
+   *   POST /api/v1/qpoints/settlement/webhook
+   * or remain PENDING if no webhook is received (e.g., if Users settle manually).
    */
   async createSettlement(
     trade: QPointTrade,
@@ -32,10 +42,12 @@ export class SettlementService {
     cashAmount: number,
   ): Promise<void> {
     this.logger.log(
-      `Settling trade ${trade.id}: buyer=${buyerId}, seller=${sellerId}, amount=$${cashAmount}`,
+      `Trade ${trade.id} matched. Recording PENDING settlement ` +
+        `(buyer=${buyerId}, seller=${sellerId}, amount=$${cashAmount.toFixed(2)}). ` +
+        'Fiat transfer is the sole responsibility of the Facilitator (TOS §4.3).',
     );
 
-    // Create pending records first (idempotently)
+    // Create PENDING audit records (append-only; never initiate fiat movement here).
     const debitRecord = this.repo.create({
       tradeId: trade.id,
       userId: buyerId,
@@ -52,66 +64,71 @@ export class SettlementService {
       status: SettlementStatus.PENDING,
     });
 
-    const [savedDebit, savedCredit] = await this.repo.save([debitRecord, creditRecord]);
+    await this.repo.save([debitRecord, creditRecord]);
 
-    let transferId: string | undefined;
-    try {
-      const result = await this.facilitator.transfer(buyerId, sellerId, cashAmount, trade.id);
-
-      if (result.status === 'failed') {
-        throw new Error(result.errorMessage ?? 'Facilitator transfer failed');
-      }
-
-      transferId = result.transferId;
-
-      // Mark both records as completed
-      const now = new Date();
-      await this.repo.update(
-        { id: savedDebit.id },
-        {
-          status: SettlementStatus.COMPLETED,
-          facilitatorReference: transferId,
-          completedAt: now,
-        },
-      );
-      await this.repo.update(
-        { id: savedCredit.id },
-        {
-          status: SettlementStatus.COMPLETED,
-          facilitatorReference: transferId,
-          completedAt: now,
-        },
-      );
-
-      this.logger.log(`Settlement completed for trade ${trade.id}: ref=${transferId}`);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Settlement FAILED for trade ${trade.id}: ${msg}`);
-
-      await this.repo.update({ id: savedDebit.id }, { status: SettlementStatus.FAILED });
-      await this.repo.update({ id: savedCredit.id }, { status: SettlementStatus.FAILED });
-
-      // Notify both parties of settlement failure
-      await this.notifications.notifyUser(
+    // Notify both parties with instructions to complete fiat payment directly
+    // via their registered Facilitator account.  Per TOS §4.2, the Facilitator
+    // handles the fiat transfer outside this Platform.
+    await Promise.all([
+      this.notifications.notifyUser(
         buyerId,
-        'settlement_failed',
-        `Cash settlement for trade failed. Ref: ${trade.id}. Support has been alerted.`,
-        { tradeId: trade.id },
-      );
-      await this.notifications.notifyUser(
+        'settlement_pending',
+        `Trade matched (ID: ${trade.id}). You owe $${cashAmount.toFixed(2)} to the seller. ` +
+          'Please complete payment via your registered Facilitator account. ' +
+          'Per Q Points Terms of Service §4.2, fiat transfers are handled exclusively by the Facilitator.',
+        { tradeId: trade.id, amount: cashAmount, section: '4.2' },
+      ),
+      this.notifications.notifyUser(
         sellerId,
-        'settlement_failed',
-        `Cash settlement for trade failed. Ref: ${trade.id}. Support has been alerted.`,
-        { tradeId: trade.id },
-      );
+        'settlement_pending',
+        `Trade matched (ID: ${trade.id}). You will receive $${cashAmount.toFixed(2)} from the buyer. ` +
+          'The buyer is completing payment via their registered Facilitator account. ' +
+          'Per Q Points Terms of Service §4.2, fiat transfers are handled exclusively by the Facilitator.',
+        { tradeId: trade.id, amount: cashAmount, section: '4.2' },
+      ),
+    ]);
+  }
 
-      throw new InternalServerErrorException(`Settlement failed for trade ${trade.id}: ${msg}`);
+  /**
+   * Confirm fiat settlement via a Facilitator webhook callback.
+   *
+   * Called from POST /api/v1/qpoints/settlement/webhook when the Facilitator
+   * confirms that the fiat transfer for a trade has been completed.
+   * This is the ONLY mechanism by which the Platform marks a settlement
+   * COMPLETED — the Platform itself never initiates the transfer (TOS §4.3).
+   *
+   * @param tradeId          The trade ID (used as the Facilitator payment reference)
+   * @param facilitatorRef   The Facilitator's own transfer/transaction ID
+   */
+  async confirmSettlementByWebhook(tradeId: string, facilitatorRef: string): Promise<void> {
+    const records = await this.repo.find({ where: { tradeId } });
+    if (!records.length) {
+      this.logger.warn(`Webhook: no settlement records found for trade ${tradeId}`);
+      return;
     }
+
+    const now = new Date();
+    await Promise.all(
+      records.map((r: QPointSettlement) =>
+        this.repo.update(
+          { id: r.id },
+          {
+            status: SettlementStatus.COMPLETED,
+            facilitatorReference: facilitatorRef,
+            completedAt: now,
+          },
+        ),
+      ),
+    );
+
+    this.logger.log(
+      `Settlement CONFIRMED for trade ${tradeId} via Facilitator webhook ref=${facilitatorRef}`,
+    );
   }
 
   async getSettlementStatus(settlementId: string): Promise<QPointSettlement> {
     const s = await this.repo.findOne({ where: { id: settlementId } });
-    if (!s) throw new InternalServerErrorException(`Settlement ${settlementId} not found`);
+    if (!s) throw new Error(`Settlement ${settlementId} not found`);
     return s;
   }
 }

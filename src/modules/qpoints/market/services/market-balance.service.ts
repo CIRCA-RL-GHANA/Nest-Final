@@ -6,7 +6,10 @@ import { QPointMarketBalance } from '../entities/q-point-market-balance.entity';
 /** Fixed supply: 500 trillion QP. No QP may ever be minted beyond this value. */
 export const QPOINTS_TOTAL_SUPPLY = 500_000_000_000_000;
 
-/** UUID of the AI market-maker participant that holds the entire genesis supply. */
+/**
+ * UUID of the AI Participant (TOS §5.2 — ordinary user; does NOT act as a market maker,
+ * liquidity provider, or stabilizer). Holds the genesis supply for operational purposes only.
+ */
 export const AI_PARTICIPANT_ID = '00000000-0000-0000-0000-000000000001';
 
 export interface BalanceResult {
@@ -73,9 +76,9 @@ export class MarketBalanceService {
       }
 
       // Supply-cap guard: QP are never minted beyond QPOINTS_TOTAL_SUPPLY.
-      // The AI market maker holds the full genesis supply; human balances are
-      // funded only by QP the AI distributes.  Crediting any account more than
-      // what the AI has already debited would violate the hard cap.
+      // The AI Participant (TOS §5.2) holds the genesis supply for operational purposes.
+      // Human balances are funded only by QP the AI Participant distributes.
+      // Crediting any account more than what the AI Participant has debited would violate the hard cap.
       if (delta > 0 && userId !== AI_PARTICIPANT_ID) {
         const sumResult = await manager
           .getRepository(QPointMarketBalance)

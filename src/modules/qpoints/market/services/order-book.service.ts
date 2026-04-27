@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
@@ -48,6 +49,22 @@ export const FIXED_QP_PRICE = 1.00;
 export class OrderBookService {
   private readonly logger = new Logger(OrderBookService.name);
 
+  /** Section 6.2 – trading suspension flag.  Set via suspendTrading() / resumeTrading(). */
+  private tradingSuspended = false;
+
+  /**
+   * Section 12.2 – set of user IDs whose Q Points trading access has been terminated
+   * by the Company.  Persisted in-memory; for multi-replica production deployments this
+   * should be backed by a DB column (e.g. User.isQpTerminated).
+   */
+  private readonly terminatedUsers = new Set<string>();
+
+  /**
+   * Section 4.3 – set of user IDs suspended due to failure to complete a fiat transfer.
+   * Admin can lift via reinstateUser().  Persisted in-memory; same DB-persistence note as above.
+   */
+  private readonly fiatSuspendedUsers = new Set<string>();
+
   constructor(
     @InjectRepository(QPointOrder)
     private readonly orderRepo: Repository<QPointOrder>,
@@ -74,6 +91,29 @@ export class OrderBookService {
     _price: number,
     quantity: number,
   ): Promise<CreateOrderResult> {
+    // Section 6.2 — trading suspension check
+    if (this.tradingSuspended) {
+      throw new ServiceUnavailableException(
+        'Q Points trading is currently suspended. Per Q Points Terms of Service Section 6.2, ' +
+          'the Company may suspend trading at any time without prior notice. ' +
+          'During any suspension, you may not place or execute orders. Please try again later.',
+      );
+    }
+    // Section 12.2 — per-user termination check
+    if (this.terminatedUsers.has(userId)) {
+      throw new ForbiddenException(
+        'Your access to the Q Points System has been terminated by the Company per Section 12.2 ' +
+          'of the Q Points Terms of Service. Please contact support if you believe this is in error.',
+      );
+    }
+    // Section 4.3 — fiat-failure suspension check
+    if (this.fiatSuspendedUsers.has(userId)) {
+      throw new ForbiddenException(
+        'Your Q Points trading privileges have been suspended due to an unresolved fiat settlement ' +
+          'failure (Q Points Terms of Service Section 4.3). Please contact support to resolve the ' +
+          'outstanding settlement issue before placing new orders.',
+      );
+    }
     // Price is always fixed at $1.00 per Q Point.
     const price = FIXED_QP_PRICE;
     return this.dataSource.transaction(async (manager: EntityManager) => {
@@ -234,6 +274,86 @@ export class OrderBookService {
   /** Market sell: sell Q Points at the fixed price of $1.00. */
   async marketSell(userId: string, quantity: number): Promise<CreateOrderResult> {
     return this.createOrder(userId, QPointOrderType.SELL, FIXED_QP_PRICE, quantity);
+  }
+
+  // -------------------------------------------------------------------------
+  // Section 6.2 – Trading suspension management
+  // -------------------------------------------------------------------------
+
+  /** Suspend all order placement.  Callable by admins via the controller. */
+  suspendTrading(): void {
+    this.tradingSuspended = true;
+    this.logger.warn('Q Points trading SUSPENDED (Section 6.2)');
+  }
+
+  /** Resume order placement after a suspension. */
+  resumeTrading(): void {
+    this.tradingSuspended = false;
+    this.logger.log('Q Points trading RESUMED');
+  }
+
+  /** Returns true when trading is currently suspended. */
+  isTradingSuspended(): boolean {
+    return this.tradingSuspended;
+  }
+
+  // -------------------------------------------------------------------------
+  // Section 12.2 – Per-user termination management
+  // -------------------------------------------------------------------------
+
+  /**
+   * Terminate a specific user's Q Points trading access.
+   * TOS Section 12.2: "The Company may terminate your access to the Q Points System
+   * at any time, with or without cause, upon notice."
+   */
+  terminateUser(userId: string): void {
+    this.terminatedUsers.add(userId);
+    this.logger.warn(`Q Points access TERMINATED for user ${userId} (Section 12.2)`);
+  }
+
+  /**
+   * Reinstate a user's Q Points trading access.
+   * Also lifts any fiat-failure suspension (Section 4.3).
+   */
+  reinstateUser(userId: string): void {
+    this.terminatedUsers.delete(userId);
+    this.fiatSuspendedUsers.delete(userId);
+    this.logger.log(`Q Points access REINSTATED for user ${userId}`);
+  }
+
+  /** Returns true if the user's Q Points access has been terminated. */
+  isUserTerminated(userId: string): boolean {
+    return this.terminatedUsers.has(userId);
+  }
+
+  // -------------------------------------------------------------------------
+  // Section 4.3 – Fiat-failure trading suspension management
+  // -------------------------------------------------------------------------
+
+  /**
+   * Suspend a user's Q Points trading due to failure to complete a fiat transfer.
+   * TOS Section 4.3: "The Platform may, at its discretion, suspend Q Points trading
+   * privileges if a User fails to complete a fiat transfer or breaches any applicable terms."
+   */
+  suspendUserForFiatFailure(userId: string): void {
+    this.fiatSuspendedUsers.add(userId);
+    this.logger.warn(
+      `Q Points trading suspended for user ${userId} due to fiat settlement failure (Section 4.3)`,
+    );
+  }
+
+  /**
+   * Lift a fiat-failure suspension for a specific user.
+   * Called by admin after the settlement issue has been resolved.
+   */
+  liftFiatSuspension(userId: string): void {
+    this.fiatSuspendedUsers.delete(userId);
+    this.logger.log(`Fiat suspension lifted for user ${userId} (Section 4.3)`);
+  }
+
+  /** Returns true if the user is suspended due to a fiat settlement failure. */
+  isUserFiatSuspended(userId: string): boolean {
+    return this.fiatSuspendedUsers.has(userId);
   }
 
   // ========================================================================

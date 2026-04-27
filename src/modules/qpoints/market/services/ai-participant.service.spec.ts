@@ -1,5 +1,5 @@
 /// <reference path="../../../../types/jest-global.d.ts" />
-import { AiLiquidityManagerService } from './ai-liquidity-manager.service';
+import { AiParticipantService } from './ai-participant.service';
 import { QPointOrder, QPointOrderStatus, QPointOrderType } from '../entities/q-point-order.entity';
 import { OrderBookService, OrderBook } from './order-book.service';
 import { MarketBalanceService } from './market-balance.service';
@@ -33,14 +33,15 @@ function makeOrder(overrides: Partial<QPointOrder> = {}): QPointOrder {
   } as QPointOrder;
 }
 
-// Config map for a fully enabled AI market manager
+// Config map for a fully enabled AI Participant (TOS §5.2)
 const aiConfig: Record<string, unknown> = {
   'ai.market.enabled': true,
   'ai.market.participantUserId': AI_USER,
   'ai.market.targetInventory': 250_000_000_000_000,
   'ai.market.minInventory': 50_000_000_000_000,
   'ai.market.maxInventory': 490_000_000_000_000,
-  'ai.market.targetSpreadPct': 2.0,
+  // targetSpreadPct intentionally absent — AI Participant must not act as a
+  // market maker or stabilizer (TOS §5.2; price is fixed at $1.00).
   'ai.market.orderBaseQty': 500,
   'ai.market.maxOrderQty': 2_500,
   'ai.market.maxOpenOrders': 10,
@@ -49,8 +50,8 @@ const aiConfig: Record<string, unknown> = {
   'ai.market.minCashReserveUsd': 5_000,
 };
 
-describe('AiLiquidityManagerService', () => {
-  let service: AiLiquidityManagerService;
+describe('AiParticipantService (§5.2 — Ordinary User)', () => {
+  let service: AiParticipantService;
   let mockOrderRepo: { find: jest.Mock };
   let mockOrderBook: {
     getOrderBook: jest.Mock;
@@ -60,13 +61,13 @@ describe('AiLiquidityManagerService', () => {
   let mockBalance: { getBalance: jest.Mock };
 
   /** Build a service instance directly — no NestJS DI container needed. */
-  function buildService(configOverrides: Record<string, unknown> = {}): AiLiquidityManagerService {
+  function buildService(configOverrides: Record<string, unknown> = {}): AiParticipantService {
     const cfg = { ...aiConfig, ...configOverrides };
     const mockConfig = { get: <T>(key: string) => cfg[key] as T };
 
     // Direct constructor instantiation bypasses @InjectRepository / DI decorators.
     // Cast through `unknown` so TypeScript accepts the partial mock types.
-    return new AiLiquidityManagerService(
+    return new AiParticipantService(
       mockOrderRepo as unknown as ReturnType<typeof jest.fn> as never,
       mockOrderBook as unknown as OrderBookService,
       mockBalance as unknown as MarketBalanceService,
@@ -147,22 +148,10 @@ describe('AiLiquidityManagerService', () => {
 
   // ─── run() – spread tightening ───────────────────────────────────────────
 
-  describe('run() – spread tightening', () => {
-    it('places tightening bid and ask when spread exceeds target', async () => {
-      // Spread is 10% (bid=0.95, ask=1.05), target is 2% → should tighten
-      mockOrderBook.getOrderBook.mockResolvedValue(bookWithSpread(0.95, 1.05));
-      // Balance is healthy → skip inventory phase
-      mockBalance.getBalance.mockResolvedValue({
-        balance: 250_000_000_000_000,
-        updatedAt: new Date(),
-      });
-
-      await service.run();
-
-      // At least 1 createOrder call (one tightening bid and/or ask)
-      expect(mockOrderBook.createOrder.mock.calls.length).toBeGreaterThanOrEqual(1);
-    });
-  });
+  // NOTE: Spread-tightening / market-making behaviour is PROHIBITED by TOS §5.2.
+  // ("does not act as a market maker, liquidity provider, or stabilizer")
+  // Price is fixed at $1.00 (TOS final clause) so spread management is
+  // also inapplicable.  No tests for spread tightening should exist.
 
   // ─── run() – stale order cancellation ────────────────────────────────────
 

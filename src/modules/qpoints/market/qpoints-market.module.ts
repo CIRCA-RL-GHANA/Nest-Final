@@ -10,6 +10,7 @@ import { QPointMarketBalance } from './entities/q-point-market-balance.entity';
 import { QPointSettlement } from './entities/q-point-settlement.entity';
 import { QPointMarketNotification } from './entities/q-point-market-notification.entity';
 import { FacilitatorAccount } from './entities/facilitator-account.entity';
+import { QPointsTosAcceptance } from './entities/qpoints-tos-acceptance.entity';
 
 // Services
 import { MarketBalanceService } from './services/market-balance.service';
@@ -17,7 +18,12 @@ import { PaymentFacilitatorService } from './services/payment-facilitator.servic
 import { MarketNotificationService } from './services/market-notification.service';
 import { SettlementService } from './services/settlement.service';
 import { OrderBookService } from './services/order-book.service';
-import { AiLiquidityManagerService } from './services/ai-liquidity-manager.service';
+import { AiParticipantService } from './services/ai-participant.service';
+import { QPointsTosService } from './services/qpoints-tos.service';
+import { FacilitatorRegistryService } from './services/facilitator-registry.service';
+
+// Guard
+import { QPointsTosGuard } from './guards/qpoints-tos.guard';
 
 // Gateway & Controller
 import { QPointsMarketGateway } from './gateway/qpoints-market.gateway';
@@ -33,6 +39,7 @@ import { RevenueModule } from '@modules/revenue/revenue.module';
       QPointSettlement,
       QPointMarketNotification,
       FacilitatorAccount,
+      QPointsTosAcceptance,
     ]),
     // JWT re-used for WebSocket authentication
     JwtModule.registerAsync({
@@ -49,12 +56,15 @@ import { RevenueModule } from '@modules/revenue/revenue.module';
   providers: [
     MarketBalanceService,
     PaymentFacilitatorService,
+    FacilitatorRegistryService,
     MarketNotificationService,
     SettlementService,
     OrderBookService,
-    AiLiquidityManagerService,
+    AiParticipantService,
+    QPointsTosService,
+    QPointsTosGuard,
     QPointsMarketGateway,
   ],
-  exports: [TypeOrmModule, MarketBalanceService, OrderBookService, MarketNotificationService],
+  exports: [TypeOrmModule, MarketBalanceService, OrderBookService, MarketNotificationService, QPointsTosService, SettlementService, FacilitatorRegistryService, PaymentFacilitatorService],
 })
 export class QPointsMarketModule {}
