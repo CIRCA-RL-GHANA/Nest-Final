@@ -18,8 +18,8 @@ export interface LoginResponse {
   user: {
     id: string;
     phoneNumber: string;
-    socialUsername: string;
-    wireId: string;
+    socialUsername: string | null;
+    wireId: string | null;
     biometricVerified: boolean;
     otpVerified: boolean;
   };

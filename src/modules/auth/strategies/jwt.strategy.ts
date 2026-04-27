@@ -9,8 +9,8 @@ import { User } from '../../users/entities/user.entity';
 export interface JwtPayload {
   sub: string; // userId
   phoneNumber: string;
-  socialUsername: string;
-  wireId: string;
+  socialUsername: string | null;
+  wireId: string | null;
   iat?: number;
   exp?: number;
 }

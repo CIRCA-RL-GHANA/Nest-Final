@@ -3,6 +3,11 @@ import { ApiProperty } from '@nestjs/swagger';
 import * as bcrypt from 'bcrypt';
 import { BaseEntity } from '@/common/entities/base.entity';
 
+export enum UserRole {
+  ADMIN = 'admin',
+  USER = 'user',
+}
+
 @Entity('users')
 export class User extends BaseEntity {
   @ApiProperty({
@@ -87,6 +92,7 @@ export class User extends BaseEntity {
   }
 
   async validatePassword(password: string): Promise<boolean> {
+    if (!this.passwordHash) return false;
     return bcrypt.compare(password, this.passwordHash);
   }
 }

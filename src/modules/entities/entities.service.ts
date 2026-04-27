@@ -87,8 +87,8 @@ export class EntitiesService {
       // Create Individual Entity
       const entity = manager.create(EntityProfile, {
         type: EntityType.INDIVIDUAL,
-        wireId: user.wireId,
-        socialUsername: user.socialUsername,
+        wireId: user.wireId ?? '',
+        socialUsername: user.socialUsername ?? '',
         ownerId: userId,
       });
 
