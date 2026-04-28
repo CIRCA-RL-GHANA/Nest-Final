@@ -114,7 +114,7 @@ export class QPointsTransactionService {
 
     // Perform risk assessment
     const riskAssessment = await this.assessRisk({
-      accountId: dto.accountId,
+      accountId: dto.accountId!,
       userId,
       amount: dto.amount,
       transactionType: TransactionType.DEPOSIT,
@@ -125,7 +125,7 @@ export class QPointsTransactionService {
 
     // Log behavior
     await this.logBehavior({
-      accountId: dto.accountId,
+      accountId: dto.accountId!,
       userId: account.entityId,
       behaviorType: BehaviorType.TRANSACTION_ATTEMPT,
       transactionId: null,
@@ -207,7 +207,7 @@ export class QPointsTransactionService {
         await this.logFraud(
           {
             transactionId: savedTransaction.id,
-            accountId: dto.accountId,
+            accountId: dto.accountId!,
             fraudDetectionReason: this.determineFraudReason(riskAssessment),
             actionTaken: riskAssessment.requiresApproval
               ? FraudActionTaken.MANUAL_REVIEW
@@ -289,7 +289,7 @@ export class QPointsTransactionService {
 
     // Perform risk assessment
     const riskAssessment = await this.assessRisk({
-      accountId: dto.sourceAccountId,
+      accountId: dto.sourceAccountId!,
       userId,
       amount: dto.amount,
       transactionType: TransactionType.TRANSFER,
@@ -300,7 +300,7 @@ export class QPointsTransactionService {
 
     // Log behavior
     await this.logBehavior({
-      accountId: dto.sourceAccountId,
+      accountId: dto.sourceAccountId!,
       userId: sourceAccount.entityId,
       behaviorType: BehaviorType.TRANSACTION_ATTEMPT,
       transactionId: null,
@@ -383,7 +383,7 @@ export class QPointsTransactionService {
         await this.logFraud(
           {
             transactionId: savedTransaction.id,
-            accountId: dto.sourceAccountId,
+            accountId: dto.sourceAccountId!,
             fraudDetectionReason: this.determineFraudReason(riskAssessment),
             actionTaken: riskAssessment.requiresApproval
               ? FraudActionTaken.MANUAL_REVIEW
@@ -459,7 +459,7 @@ export class QPointsTransactionService {
 
     // Perform risk assessment
     const riskAssessment = await this.assessRisk({
-      accountId: dto.accountId,
+      accountId: dto.accountId!,
       userId,
       amount: dto.amount,
       transactionType: TransactionType.WITHDRAWAL,
@@ -470,7 +470,7 @@ export class QPointsTransactionService {
 
     // Log behavior
     await this.logBehavior({
-      accountId: dto.accountId,
+      accountId: dto.accountId!,
       userId: account.entityId,
       behaviorType: BehaviorType.TRANSACTION_ATTEMPT,
       transactionId: null,
@@ -553,7 +553,7 @@ export class QPointsTransactionService {
         await this.logFraud(
           {
             transactionId: savedTransaction.id,
-            accountId: dto.accountId,
+            accountId: dto.accountId!,
             fraudDetectionReason: this.determineFraudReason(riskAssessment),
             actionTaken: riskAssessment.requiresApproval
               ? FraudActionTaken.MANUAL_REVIEW

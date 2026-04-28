@@ -32,7 +32,3 @@ export class TransferQPointsDto {
   @IsOptional()
   metadata?: Record<string, any>;
 }
-
-  @IsOptional()
-  metadata?: Record<string, any>;
-}
