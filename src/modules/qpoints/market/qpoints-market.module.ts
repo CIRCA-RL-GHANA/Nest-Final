@@ -25,6 +25,7 @@ import { QPointsTosService } from './services/qpoints-tos.service';
 import { FacilitatorRegistryService } from './services/facilitator-registry.service';
 import { CrossFacilitatorEngineService } from './services/cross-facilitator-engine.service';
 import { NettingEngineService } from './services/netting-engine.service';
+import { FacilitatorBalanceService } from './services/facilitator-balance.service';
 
 // Guard
 import { QPointsTosGuard } from './guards/qpoints-tos.guard';
@@ -67,12 +68,13 @@ import { RevenueModule } from '@modules/revenue/revenue.module';
     SettlementService,
     CrossFacilitatorEngineService,
     NettingEngineService,
+    FacilitatorBalanceService,
     OrderBookService,
     AiParticipantService,
     QPointsTosService,
     QPointsTosGuard,
     QPointsMarketGateway,
   ],
-  exports: [TypeOrmModule, MarketBalanceService, OrderBookService, MarketNotificationService, QPointsTosService, SettlementService, FacilitatorRegistryService, PaymentFacilitatorService, CrossFacilitatorEngineService, NettingEngineService],
+  exports: [TypeOrmModule, MarketBalanceService, OrderBookService, MarketNotificationService, QPointsTosService, SettlementService, FacilitatorRegistryService, PaymentFacilitatorService, CrossFacilitatorEngineService, NettingEngineService, FacilitatorBalanceService],
 })
 export class QPointsMarketModule {}

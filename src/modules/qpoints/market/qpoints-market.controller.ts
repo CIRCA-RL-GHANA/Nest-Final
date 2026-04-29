@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Request } from 'express';
+import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -29,6 +30,7 @@ import { SettlementService } from './services/settlement.service';
 import { QPointsTosService } from './services/qpoints-tos.service';
 import { CrossFacilitatorEngineService } from './services/cross-facilitator-engine.service';
 import { NettingEngineService } from './services/netting-engine.service';
+import { FacilitatorBalanceService } from './services/facilitator-balance.service';
 import { NettingTaskStatus } from './entities/netting-task.entity';
 import { QPointsTosGuard, SkipTosCheck } from './guards/qpoints-tos.guard';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -57,6 +59,7 @@ function clientUserAgent(req: Request): string {
 @Controller('qpoints')
 export class QPointsMarketController {
   constructor(
+    private readonly config: ConfigService,
     private readonly orderBook: OrderBookService,
     private readonly balance: MarketBalanceService,
     private readonly notifications: MarketNotificationService,
@@ -67,6 +70,7 @@ export class QPointsMarketController {
     private readonly tosService: QPointsTosService,
     private readonly crossFacilitatorEngine: CrossFacilitatorEngineService,
     private readonly nettingEngine: NettingEngineService,
+    private readonly facilitatorBalance: FacilitatorBalanceService,
   ) {}
 
   // ---------------------------------------------------------------------- tos
@@ -398,6 +402,96 @@ export class QPointsMarketController {
   @ApiResponse({ status: 200, description: 'List of registered facilitator accounts' })
   async getPaymentAccounts(@Req() req: Request) {
     return this.facilitator.getUserAccounts(userId(req));
+  }
+
+  // ---------------------------------------------------------------------- cash balance (Zen of User Balance)
+
+  /**
+   * Returns the platform's real-time cash balance at the user's primary
+   * registered payment facilitator, cached for 30 seconds in Redis.
+   *
+   * This is a server-to-server balance fetch — the client never calls the
+   * facilitator API directly. The balance confirms that the platform has
+   * liquidity available to honour the user's cash-out at the current sell
+   * price ($0.999/QP) and discloses the 0.1% liquidity fee transparently.
+   */
+  @Get('payment/cash-balance')
+  @ApiOperation({
+    summary: 'Get real-time facilitator cash balance (30s cached)',
+    description:
+      'Fetches the platform\'s available fiat balance at the user\'s primary payment ' +
+      'facilitator via a server-to-server API call. Results are cached for 30 seconds. ' +
+      'Includes the current buy/sell prices ($1.001/$0.999 per QP) and the 0.1% ' +
+      'liquidity fee description for transparent fee disclosure (TOS §7.1). ' +
+      'The balance confirms that sufficient liquidity exists for the user\'s cash-out.',
+  })
+  @ApiResponse({ status: 200, description: 'Facilitator cash balance (possibly cached)' })
+  @ApiResponse({ status: 200, description: 'No payment account registered' })
+  async getCashBalance(@Req() req: Request) {
+    return this.facilitatorBalance.getBalance(userId(req), false);
+  }
+
+  /**
+   * Force a fresh balance fetch from the facilitator API, bypassing the
+   * 30-second cache. Use this when the user taps the Refresh button in the UI.
+   * Rate-limited to 1 request per 5 seconds per user by the platform throttle.
+   */
+  @Post('payment/cash-balance/refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Force-refresh facilitator cash balance (bypass 30s cache)',
+    description:
+      'Bypasses the Redis cache and fetches a live balance directly from the ' +
+      'facilitator\'s API. Use this when the user explicitly taps the Refresh button. ' +
+      'Subject to the platform\'s rate limiter (ThrottlerModule). ' +
+      'Returns the same shape as GET /qpoints/payment/cash-balance with isCached=false.',
+  })
+  @ApiResponse({ status: 200, description: 'Fresh facilitator cash balance' })
+  async refreshCashBalance(@Req() req: Request) {
+    return this.facilitatorBalance.getBalance(userId(req), true);
+  }
+
+  /**
+   * Facilitator balance-change webhook — invalidates the Redis cache for the
+   * specified user when the facilitator pushes a real-time balance update.
+   *
+   * The platform never trusts the webhook payload for balance values — it only
+   * uses it as a cache-bust signal.  The next GET /payment/cash-balance call
+   * will fetch a fresh balance from the facilitator API.
+   *
+   * Security: webhook callers must supply the shared PAYMENT_FACILITATOR_WEBHOOK_SECRET
+   * in the X-Webhook-Secret header.  Requests without a valid secret are silently
+   * acknowledged (200 OK) but the cache is NOT invalidated, preventing DoS.
+   */
+  @Post('webhook/balance-update')
+  @SkipTosCheck()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Facilitator webhook: invalidate cached balance (cache-bust signal)',
+    description:
+      'Called by a licensed payment facilitator when the platform account balance changes. ' +
+      'The platform invalidates the Redis cache for the affected user so the next ' +
+      'GET /qpoints/payment/cash-balance returns a live value. ' +
+      'The X-Webhook-Secret header must match PAYMENT_FACILITATOR_WEBHOOK_SECRET.',
+  })
+  @ApiResponse({ status: 200, description: 'Cache invalidated (or secret mismatch — acknowledged silently)' })
+  async facilitatorBalanceWebhook(
+    @Body() body: { userId?: string; provider?: string },
+    @Req() req: Request,
+  ) {
+    const expectedSecret = req.headers['x-webhook-secret'] as string | undefined;
+    const configuredSecret = this.config?.get<string>('payments.webhookSecret');
+    if (!configuredSecret || expectedSecret !== configuredSecret) {
+      // Silently acknowledge — do NOT reveal whether the secret matched
+      return { received: true };
+    }
+    if (body.userId) {
+      await this.facilitatorBalance.invalidateCache(
+        body.userId,
+        body.provider as any,
+      );
+    }
+    return { received: true, invalidated: !!body.userId };
   }
 
   // ---------------------------------------------------------------------- admin
