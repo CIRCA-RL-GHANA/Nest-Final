@@ -14,6 +14,8 @@ import { MarketBalanceService } from './market-balance.service';
 import { SettlementService } from './settlement.service';
 import { MarketNotificationService } from './market-notification.service';
 import { RevenueService } from '@modules/revenue/revenue.service';
+import { CrossFacilitatorEngineService } from './cross-facilitator-engine.service';
+import { FacilitatorProvider } from './payment-facilitator.service';
 
 export interface PriceLevel {
   price: number;
@@ -75,6 +77,7 @@ export class OrderBookService {
     private readonly settlement: SettlementService,
     private readonly notifications: MarketNotificationService,
     private readonly revenue: RevenueService,
+    private readonly crossFacilitatorEngine: CrossFacilitatorEngineService,
   ) {}
 
   // ========================================================================
@@ -90,6 +93,7 @@ export class OrderBookService {
     type: QPointOrderType,
     _price: number,
     quantity: number,
+    facilitatorId?: FacilitatorProvider,
   ): Promise<CreateOrderResult> {
     // Section 6.2 — trading suspension check
     if (this.tradingSuspended) {
@@ -116,7 +120,7 @@ export class OrderBookService {
     }
     // Price is always fixed at $1.00 per Q Point.
     const price = FIXED_QP_PRICE;
-    return this.dataSource.transaction(async (manager: EntityManager) => {
+    const result = await this.dataSource.transaction(async (manager: EntityManager) => {
       const orderMgr = manager.getRepository(QPointOrder);
       const tradeMgr = manager.getRepository(QPointTrade);
 
@@ -138,14 +142,112 @@ export class OrderBookService {
         quantity,
         filledQuantity: 0,
         status: QPointOrderStatus.OPEN,
+        facilitatorId,
       });
       await orderMgr.save(order);
 
-      // Attempt matching
+      // Attempt matching (with cross-facilitator awareness)
       const trades = await this._matchOrders(order, orderMgr, tradeMgr);
 
       return { order, trades };
     });
+
+    // ── Cross-facilitator bridge dispatch ────────────────────────────────────
+    // If no trades were matched AND we have a facilitatorId, check if the best
+    // available counter order is on a different facilitator. If so, and the AI
+    // bridge is available, execute a matched-principal bridge transaction.
+    if (result.trades.length === 0 && facilitatorId) {
+      await this._attemptCrossFacilitatorBridge(result.order, facilitatorId);
+    }
+
+    return result;
+  }
+
+  /**
+   * Check if a cross-facilitator bridge can satisfy an unmatched order.
+   * If so, find the best counter-order on a different facilitator and execute
+   * the AI bridge (matched principal).
+   *
+   * This is called after the main matching loop fails to find a same-facilitator
+   * counterparty. The AI bridge is the second resort (after peer matching).
+   */
+  private async _attemptCrossFacilitatorBridge(
+    order: QPointOrder,
+    userFacilitatorId: FacilitatorProvider,
+  ): Promise<void> {
+    const oppositeSide = order.type === QPointOrderType.BUY
+      ? QPointOrderType.SELL
+      : QPointOrderType.BUY;
+
+    // Find the best counter order on a DIFFERENT facilitator
+    const counterOrder = await this.orderRepo
+      .createQueryBuilder('o')
+      .where('o.type = :side', { side: oppositeSide })
+      .andWhere('o.status = :status', { status: QPointOrderStatus.OPEN })
+      .andWhere('o.user_id != :uid', { uid: order.userId })
+      .andWhere('o.facilitator_id IS NOT NULL')
+      .andWhere('o.facilitator_id != :fid', { fid: userFacilitatorId })
+      .orderBy('o.price', order.type === QPointOrderType.BUY ? 'ASC' : 'DESC')
+      .addOrderBy('o.created_at', 'ASC')
+      .getOne();
+
+    if (!counterOrder || !counterOrder.facilitatorId) return;
+
+    const canBridge = await this.crossFacilitatorEngine.isCrossFacilitatorTrade(
+      userFacilitatorId,
+      counterOrder.facilitatorId as FacilitatorProvider,
+    );
+
+    if (!canBridge) return;
+
+    const fillQty = Math.min(
+      Number(order.quantity) - Number(order.filledQuantity),
+      Number(counterOrder.quantity) - Number(counterOrder.filledQuantity),
+    );
+
+    if (fillQty <= 0) return;
+
+    // Determine buyer and seller for the bridge
+    const buyerUserId = order.type === QPointOrderType.BUY ? order.userId : counterOrder.userId;
+    const buyerFacilitatorId = order.type === QPointOrderType.BUY
+      ? userFacilitatorId
+      : (counterOrder.facilitatorId as FacilitatorProvider);
+    const sellerUserId = order.type === QPointOrderType.SELL ? order.userId : counterOrder.userId;
+    const sellerFacilitatorId = order.type === QPointOrderType.SELL
+      ? userFacilitatorId
+      : (counterOrder.facilitatorId as FacilitatorProvider);
+
+    try {
+      await this.crossFacilitatorEngine.executeBridge(
+        buyerUserId,
+        buyerFacilitatorId,
+        sellerUserId,
+        sellerFacilitatorId,
+        fillQty,
+      );
+
+      // Mark both orders as filled (bridge handled the match)
+      await this.dataSource.transaction(async (manager: EntityManager) => {
+        const orderMgr = manager.getRepository(QPointOrder);
+        await orderMgr.update({ id: order.id }, {
+          filledQuantity: fillQty,
+          status: QPointOrderStatus.FILLED,
+        });
+        const newCounterFilled = Number(counterOrder.filledQuantity) + fillQty;
+        const counterStatus = newCounterFilled >= Number(counterOrder.quantity)
+          ? QPointOrderStatus.FILLED
+          : QPointOrderStatus.OPEN;
+        await orderMgr.update({ id: counterOrder.id }, {
+          filledQuantity: newCounterFilled,
+          status: counterStatus,
+        });
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Cross-facilitator bridge attempt failed for order ${order.id}: ${msg}`,
+      );
+    }
   }
 
   /** Cancel an open order.  Only the owner may cancel. */
@@ -267,13 +369,13 @@ export class OrderBookService {
   }
 
   /** Market buy: buy Q Points at the fixed price of $1.00. */
-  async marketBuy(userId: string, quantity: number): Promise<CreateOrderResult> {
-    return this.createOrder(userId, QPointOrderType.BUY, FIXED_QP_PRICE, quantity);
+  async marketBuy(userId: string, quantity: number, facilitatorId?: FacilitatorProvider): Promise<CreateOrderResult> {
+    return this.createOrder(userId, QPointOrderType.BUY, FIXED_QP_PRICE, quantity, facilitatorId);
   }
 
   /** Market sell: sell Q Points at the fixed price of $1.00. */
-  async marketSell(userId: string, quantity: number): Promise<CreateOrderResult> {
-    return this.createOrder(userId, QPointOrderType.SELL, FIXED_QP_PRICE, quantity);
+  async marketSell(userId: string, quantity: number, facilitatorId?: FacilitatorProvider): Promise<CreateOrderResult> {
+    return this.createOrder(userId, QPointOrderType.SELL, FIXED_QP_PRICE, quantity, facilitatorId);
   }
 
   // -------------------------------------------------------------------------
@@ -400,6 +502,29 @@ export class OrderBookService {
         .getOne();
 
       if (!counterOrder) break;
+
+      // ── Cross-facilitator check ──────────────────────────────────────────
+      // If the incoming order and the counter order are on different facilitators,
+      // route through the AI bridge (matched principal) instead of a direct match.
+      if (
+        order.facilitatorId &&
+        counterOrder.facilitatorId &&
+        order.facilitatorId !== counterOrder.facilitatorId
+      ) {
+        const canBridge = await this.crossFacilitatorEngine.isCrossFacilitatorTrade(
+          order.facilitatorId,
+          counterOrder.facilitatorId,
+        );
+
+        if (canBridge) {
+          // Break out of the direct-match loop; the bridge will handle this trade.
+          // The caller (createOrder) detects no trades were matched and the order
+          // stays open — then we execute the bridge below.
+          break;
+        }
+        // If bridge unavailable, fall through to direct match attempt
+        // (direct cross-facilitator match is a fallback when bridge is suspended).
+      }
 
       const counterRemaining = Number(counterOrder.quantity) - Number(counterOrder.filledQuantity);
 

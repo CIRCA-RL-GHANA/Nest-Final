@@ -55,6 +55,35 @@ export class QPointTrade {
   @JoinColumn({ name: 'seller_id' })
   seller: User;
 
+  /**
+   * Payment facilitator for the buyer's leg of this trade.
+   * Null for same-facilitator or pure QP trades.
+   */
+  @Column({ name: 'buyer_facilitator_id', type: 'varchar', length: 32, nullable: true })
+  buyerFacilitatorId?: string;
+
+  /**
+   * Payment facilitator for the seller's leg of this trade.
+   * Null for same-facilitator or pure QP trades.
+   */
+  @Column({ name: 'seller_facilitator_id', type: 'varchar', length: 32, nullable: true })
+  sellerFacilitatorId?: string;
+
+  /**
+   * True when this trade is one leg of an AI-bridged cross-facilitator transaction.
+   * The AI is one counterparty; the linked leg ID is stored in crossFacilitatorPairId.
+   */
+  @Column({ name: 'is_cross_facilitator', type: 'boolean', default: false })
+  isCrossFacilitator: boolean;
+
+  /**
+   * Links the two legs of a cross-facilitator bridge transaction.
+   * Both Leg 1 (AI sells to buyer) and Leg 2 (AI buys from seller) share this UUID.
+   */
+  @Column({ name: 'cross_facilitator_pair_id', type: 'uuid', nullable: true })
+  @Index('idx_qpt_cf_pair')
+  crossFacilitatorPairId?: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp with time zone' })
   @Index()
   createdAt: Date;

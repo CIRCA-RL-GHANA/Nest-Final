@@ -27,6 +27,9 @@ import { PaymentFacilitatorService } from './services/payment-facilitator.servic
 import { FacilitatorRegistryService } from './services/facilitator-registry.service';
 import { SettlementService } from './services/settlement.service';
 import { QPointsTosService } from './services/qpoints-tos.service';
+import { CrossFacilitatorEngineService } from './services/cross-facilitator-engine.service';
+import { NettingEngineService } from './services/netting-engine.service';
+import { NettingTaskStatus } from './entities/netting-task.entity';
 import { QPointsTosGuard, SkipTosCheck } from './guards/qpoints-tos.guard';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CashQuantityDto } from './dto/cash-quantity.dto';
@@ -62,6 +65,8 @@ export class QPointsMarketController {
     private readonly facilRegistry: FacilitatorRegistryService,
     private readonly settlement: SettlementService,
     private readonly tosService: QPointsTosService,
+    private readonly crossFacilitatorEngine: CrossFacilitatorEngineService,
+    private readonly nettingEngine: NettingEngineService,
   ) {}
 
   // ---------------------------------------------------------------------- tos
@@ -611,5 +616,184 @@ export class QPointsMarketController {
         `User ${targetUserId} Q Points trading suspended due to fiat settlement failure (§4.3). ` +
         'Contact support to resolve the outstanding settlement before lifting this suspension.',
     };
+  }
+
+  // ---------------------------------------------------------------------- cross-facilitator admin (§5.2 bridge)
+
+  /**
+   * Get the AI Participant's cash balance across all facilitators.
+   * Used to monitor bridge health and identify when rebalancing is needed.
+   */
+  @Get('admin/cross-facilitator/balances')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: '[Admin] Get AI Participant cash balances across all facilitators',
+    description:
+      'Returns the AI Participant\'s cash position at each payment facilitator. ' +
+      'When a facilitator balance falls below its minimum reserve, the bridge is ' +
+      'suspended for that facilitator and a netting task is created. ' +
+      'The platform finance team must execute a wire transfer to restore the balance.',
+  })
+  async getCrossFacilitatorBalances() {
+    return this.crossFacilitatorEngine.getAllAiBalances();
+  }
+
+  /**
+   * Get the AI's net position summary (health dashboard for netting engine).
+   */
+  @Get('admin/cross-facilitator/net-position')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: '[Admin] Get AI net cash position summary across all facilitators',
+  })
+  async getNetPositionSummary() {
+    return this.nettingEngine.getNetPositionSummary();
+  }
+
+  /**
+   * Register a new facilitator in the AI bridge system.
+   * Creates an AiFacilitatorBalance row for the given facilitator.
+   * Finance team must fund the AI's account before activating the bridge.
+   */
+  @Post('admin/cross-facilitator/facilitators')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '[Admin] Register a facilitator in the AI bridge system',
+    description:
+      'Creates an AI cash balance tracking row for the given facilitator. ' +
+      'The bridge will be inactive until the platform funds the AI\'s account ' +
+      'and an admin updates the balance (or completes a netting task).',
+  })
+  async registerFacilitatorInBridge(
+    @Body() body: { facilitatorId: string; minReserveUsd?: number },
+  ) {
+    const balance = await this.crossFacilitatorEngine.ensureBalanceRow(
+      body.facilitatorId as any,
+      body.minReserveUsd,
+    );
+    return { success: true, balance };
+  }
+
+  /**
+   * Manually update the AI's cash balance at a facilitator.
+   * Used when the finance team deposits funds directly into the AI's account.
+   */
+  @Post('admin/cross-facilitator/balances/:facilitatorId/fund')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '[Admin] Record a new funding deposit into the AI bridge account at a facilitator',
+    description:
+      'Use this when the platform finance team deposits new operational funds into the AI\'s ' +
+      'account at a specific facilitator. This activates or restores the bridge if the new ' +
+      'balance meets the minimum reserve.',
+  })
+  async fundFacilitatorBalance(
+    @Param('facilitatorId') facilitatorId: string,
+    @Body() body: { amountUsd: number },
+    @Req() _req: Request,
+  ) {
+    await this.crossFacilitatorEngine.recordExternalFunding(facilitatorId as any, body.amountUsd);
+    return {
+      success: true,
+      message:
+        `Recorded $${body.amountUsd} external funding deposit at ${facilitatorId}. ` +
+        'The bridge will activate automatically if the new balance meets the minimum reserve.',
+    };
+  }
+
+  // ---------------------------------------------------------------------- netting tasks
+
+  /**
+   * List all netting tasks (rebalancing requests created by the NettingEngine).
+   */
+  @Get('admin/netting/tasks')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: '[Admin] List netting/rebalancing tasks for AI cash position management',
+    description:
+      'Returns tasks created by the hourly NettingEngine when the AI\'s cash at any facilitator ' +
+      'deviates beyond the reserve threshold. The platform finance team must execute the ' +
+      'indicated wire transfers to rebalance the AI\'s accounts.',
+  })
+  @ApiQuery({ name: 'status', required: false, description: 'Filter by status (pending, completed, cancelled)' })
+  async listNettingTasks(@Query('status') status?: string) {
+    const validStatus = status && Object.values(NettingTaskStatus).includes(status as NettingTaskStatus)
+      ? (status as NettingTaskStatus)
+      : undefined;
+    return this.nettingEngine.listNettingTasks(validStatus);
+  }
+
+  /**
+   * Mark a netting task as completed after the finance team executes the wire.
+   */
+  @Post('admin/netting/tasks/:taskId/complete')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '[Admin] Complete a netting task (confirm wire transfer was executed)',
+    description:
+      'Call this after the platform finance team has executed the wire transfer between ' +
+      'the two facilitator accounts. Updates the AI\'s tracked cash balances and may ' +
+      'reactivate a suspended bridge.',
+  })
+  async completeNettingTask(
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Body() body: { transferReference: string; notes?: string },
+    @Req() req: Request,
+  ) {
+    return this.nettingEngine.completeNettingTask(
+      taskId,
+      userId(req),
+      body.transferReference,
+      body.notes,
+    );
+  }
+
+  /**
+   * Cancel a pending netting task.
+   */
+  @Post('admin/netting/tasks/:taskId/cancel')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[Admin] Cancel a pending netting task' })
+  async cancelNettingTask(
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Body() body: { notes?: string },
+    @Req() req: Request,
+  ) {
+    return this.nettingEngine.cancelNettingTask(taskId, userId(req), body.notes);
+  }
+
+  /**
+   * Manually trigger a netting engine run (immediate rebalancing assessment).
+   */
+  @Post('admin/netting/run')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '[Admin] Manually trigger a netting engine run',
+    description: 'Runs the netting assessment immediately, creating tasks for any imbalanced facilitators.',
+  })
+  async triggerNettingRun() {
+    await this.nettingEngine.triggerManualNettingRun();
+    return { success: true, message: 'Netting engine run triggered. Check tasks for results.' };
   }
 }

@@ -111,6 +111,11 @@ export const configuration = () => ({
       runIntervalSeconds: parseInt(process.env.AI_RUN_INTERVAL_SECONDS ?? '30', 10),
       minCashReserveUsd: parseFloat(process.env.AI_MIN_CASH_RESERVE_USD ?? '5000'),
     },
+    // Cross-facilitator bridge (matched principal)
+    bridge: {
+      minReserveUsd: parseFloat(process.env.AI_BRIDGE_MIN_RESERVE_USD ?? '10000'),
+      rebalancingThresholdUsd: parseFloat(process.env.AI_BRIDGE_REBALANCING_THRESHOLD_USD ?? '5000'),
+    },
   },
 
   // Google Maps

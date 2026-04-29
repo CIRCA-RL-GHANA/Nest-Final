@@ -11,6 +11,8 @@ import { QPointSettlement } from './entities/q-point-settlement.entity';
 import { QPointMarketNotification } from './entities/q-point-market-notification.entity';
 import { FacilitatorAccount } from './entities/facilitator-account.entity';
 import { QPointsTosAcceptance } from './entities/qpoints-tos-acceptance.entity';
+import { AiFacilitatorBalance } from './entities/ai-facilitator-balance.entity';
+import { NettingTask } from './entities/netting-task.entity';
 
 // Services
 import { MarketBalanceService } from './services/market-balance.service';
@@ -21,6 +23,8 @@ import { OrderBookService } from './services/order-book.service';
 import { AiParticipantService } from './services/ai-participant.service';
 import { QPointsTosService } from './services/qpoints-tos.service';
 import { FacilitatorRegistryService } from './services/facilitator-registry.service';
+import { CrossFacilitatorEngineService } from './services/cross-facilitator-engine.service';
+import { NettingEngineService } from './services/netting-engine.service';
 
 // Guard
 import { QPointsTosGuard } from './guards/qpoints-tos.guard';
@@ -40,6 +44,8 @@ import { RevenueModule } from '@modules/revenue/revenue.module';
       QPointMarketNotification,
       FacilitatorAccount,
       QPointsTosAcceptance,
+      AiFacilitatorBalance,
+      NettingTask,
     ]),
     // JWT re-used for WebSocket authentication
     JwtModule.registerAsync({
@@ -59,12 +65,14 @@ import { RevenueModule } from '@modules/revenue/revenue.module';
     FacilitatorRegistryService,
     MarketNotificationService,
     SettlementService,
+    CrossFacilitatorEngineService,
+    NettingEngineService,
     OrderBookService,
     AiParticipantService,
     QPointsTosService,
     QPointsTosGuard,
     QPointsMarketGateway,
   ],
-  exports: [TypeOrmModule, MarketBalanceService, OrderBookService, MarketNotificationService, QPointsTosService, SettlementService, FacilitatorRegistryService, PaymentFacilitatorService],
+  exports: [TypeOrmModule, MarketBalanceService, OrderBookService, MarketNotificationService, QPointsTosService, SettlementService, FacilitatorRegistryService, PaymentFacilitatorService, CrossFacilitatorEngineService, NettingEngineService],
 })
 export class QPointsMarketModule {}

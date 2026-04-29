@@ -112,4 +112,8 @@ export const validationSchema = Joi.object({
   AI_ORDER_TTL_SECONDS: Joi.number().integer().default(300),
   AI_RUN_INTERVAL_SECONDS: Joi.number().integer().default(30),
   AI_MIN_CASH_RESERVE_USD: Joi.number().default(5000),
+
+  // Cross-facilitator bridge
+  AI_BRIDGE_MIN_RESERVE_USD: Joi.number().min(0).default(10000),
+  AI_BRIDGE_REBALANCING_THRESHOLD_USD: Joi.number().min(0).default(5000),
 });

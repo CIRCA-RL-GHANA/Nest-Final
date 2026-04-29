@@ -6,6 +6,8 @@ import { Repository } from 'typeorm';
 import { QPointOrder, QPointOrderStatus, QPointOrderType } from '../entities/q-point-order.entity';
 import { OrderBookService, FIXED_QP_PRICE } from './order-book.service';
 import { MarketBalanceService } from './market-balance.service';
+import { CrossFacilitatorEngineService } from './cross-facilitator-engine.service';
+import { FacilitatorProvider } from './payment-facilitator.service';
 
 export interface AIConfig {
   enabled: boolean;
@@ -60,6 +62,7 @@ export class AiParticipantService {
     private readonly orderBook: OrderBookService,
     private readonly balance: MarketBalanceService,
     private readonly config: ConfigService,
+    private readonly crossFacilitatorEngine: CrossFacilitatorEngineService,
   ) {
     this.cfg = {
       enabled: config.get<boolean>('ai.market.enabled') ?? true, // On by default: maintains last-resort standing orders per TOS §5.2 operational commitment
@@ -193,14 +196,39 @@ export class AiParticipantService {
    */
   private async _ensureStandingOrders(): Promise<void> {
     const openOrders = await this._getAiOpenOrders();
-    const hasOpenBuy = openOrders.some((o) => o.type === QPointOrderType.BUY);
-    const hasOpenSell = openOrders.some((o) => o.type === QPointOrderType.SELL);
+    const hasOpenBuy = openOrders.some((o) => o.type === QPointOrderType.BUY && !o.facilitatorId);
+    const hasOpenSell = openOrders.some((o) => o.type === QPointOrderType.SELL && !o.facilitatorId);
 
     if (!hasOpenBuy) {
       await this._placeStandingOrder(QPointOrderType.BUY, MIN_STANDBY_QTY);
     }
     if (!hasOpenSell) {
       await this._placeStandingOrder(QPointOrderType.SELL, MIN_STANDBY_QTY);
+    }
+
+    // ── Per-facilitator bridge standing orders ────────────────────────────
+    // The AI maintains separate BUY + SELL standing orders for each active
+    // payment facilitator. These allow the cross-facilitator matching engine
+    // to route unmatched orders to the AI bridge seamlessly.
+    // Price is the same ($1.001 sell / $0.999 buy) across all facilitators.
+    const allBalances = await this.crossFacilitatorEngine.getAllAiBalances();
+    for (const balance of allBalances) {
+      if (!balance.isBridgeActive) continue; // Skip facilitators with suspended bridges
+
+      const facilitatorId = balance.facilitatorId as FacilitatorProvider;
+      const hasFacilitatorBuy = openOrders.some(
+        (o) => o.type === QPointOrderType.BUY && o.facilitatorId === facilitatorId,
+      );
+      const hasFacilitatorSell = openOrders.some(
+        (o) => o.type === QPointOrderType.SELL && o.facilitatorId === facilitatorId,
+      );
+
+      if (!hasFacilitatorBuy) {
+        await this._placeStandingOrder(QPointOrderType.BUY, MIN_STANDBY_QTY, facilitatorId);
+      }
+      if (!hasFacilitatorSell) {
+        await this._placeStandingOrder(QPointOrderType.SELL, MIN_STANDBY_QTY, facilitatorId);
+      }
     }
   }
 
@@ -210,17 +238,22 @@ export class AiParticipantService {
    * Peer orders at the same price are matched first (price-time priority).
    * This is operationally available but not a legal guarantee (see TOS §6.1).
    */
-  private async _placeStandingOrder(type: QPointOrderType, quantity: number): Promise<void> {
+  private async _placeStandingOrder(
+    type: QPointOrderType,
+    quantity: number,
+    facilitatorId?: FacilitatorProvider,
+  ): Promise<void> {
     const price = parseFloat(FIXED_QP_PRICE.toFixed(4));
     const qty = parseFloat(quantity.toFixed(4));
+    const label = facilitatorId ? `[${facilitatorId}] ` : '';
     this.logger.log(
-      `AI Participant placing last-resort ${type} standing order (TOS §5.2, operational): price=${price}, qty=${qty}`,
+      `AI Participant placing last-resort ${type} standing order ${label}(TOS §5.2, operational): price=${price}, qty=${qty}`,
     );
     try {
-      await this.orderBook.createOrder(this.cfg.participantUserId, type, price, qty);
+      await this.orderBook.createOrder(this.cfg.participantUserId, type, price, qty, facilitatorId);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`AI standing order (${type}) placement failed: ${msg}`);
+      this.logger.error(`AI standing order ${label}(${type}) placement failed: ${msg}`);
     }
   }
 

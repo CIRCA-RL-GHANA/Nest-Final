@@ -126,6 +126,82 @@ export class SettlementService {
     );
   }
 
+  /**
+   * Record pending settlements for a cross-facilitator bridge transaction.
+   *
+   * Two separate settlement records are created:
+   *   Leg 1: Buyer DEBIT (buyer pays AI via buyer's facilitator).
+   *   Leg 2: Seller CREDIT (AI pays seller via seller's facilitator).
+   *
+   * These are separate settlements because they occur in different payment networks.
+   * Neither settlement involves a direct user-to-user cash transfer.
+   * The AI is the counterparty in each leg (TOS §5.2 matched principal).
+   *
+   * @param leg1              The trade record for Leg 1 (AI sells QP to buyer)
+   * @param leg2              The trade record for Leg 2 (AI buys QP from seller)
+   * @param buyerUserId       The buyer's user ID
+   * @param sellerUserId      The seller's user ID
+   * @param buyerAmountUsd    Amount the buyer pays the AI (at AI_BRIDGE_SELL_PRICE)
+   * @param sellerAmountUsd   Amount the AI pays the seller (at AI_BRIDGE_BUY_PRICE)
+   * @param pairId            Cross-facilitator pair UUID linking both legs
+   */
+  async createCrossFacilitatorSettlement(
+    leg1: QPointTrade,
+    leg2: QPointTrade,
+    buyerUserId: string,
+    sellerUserId: string,
+    buyerAmountUsd: number,
+    sellerAmountUsd: number,
+    pairId: string,
+  ): Promise<void> {
+    this.logger.log(
+      `Cross-facilitator bridge settlement: pairId=${pairId}, ` +
+        `buyer=${buyerUserId} owes $${buyerAmountUsd.toFixed(2)} to AI (Leg 1), ` +
+        `seller=${sellerUserId} receives $${sellerAmountUsd.toFixed(2)} from AI (Leg 2).`,
+    );
+
+    // Leg 1: buyer pays AI (DEBIT the buyer)
+    const leg1Debit = this.repo.create({
+      tradeId: leg1.id,
+      userId: buyerUserId,
+      amount: buyerAmountUsd,
+      type: SettlementType.DEBIT,
+      status: SettlementStatus.PENDING,
+    });
+
+    // Leg 2: AI pays seller (CREDIT the seller)
+    const leg2Credit = this.repo.create({
+      tradeId: leg2.id,
+      userId: sellerUserId,
+      amount: sellerAmountUsd,
+      type: SettlementType.CREDIT,
+      status: SettlementStatus.PENDING,
+    });
+
+    await this.repo.save([leg1Debit, leg2Credit]);
+
+    await Promise.all([
+      this.notifications.notifyUser(
+        buyerUserId,
+        'settlement_pending',
+        `Your Q Points purchase is confirmed (pair ${pairId}). ` +
+          `Please complete payment of $${buyerAmountUsd.toFixed(2)} to the AI Participant ` +
+          'via your registered payment method. Per Q Points ToS §4.2, fiat transfers are ' +
+          'handled exclusively by the Facilitator.',
+        { tradeId: leg1.id, pairId, amount: buyerAmountUsd, section: '4.2', type: 'cross_facilitator' },
+      ),
+      this.notifications.notifyUser(
+        sellerUserId,
+        'settlement_pending',
+        `Your Q Points sale is confirmed (pair ${pairId}). ` +
+          `You will receive $${sellerAmountUsd.toFixed(2)} from the AI Participant ` +
+          'to your registered payment account. Per Q Points ToS §4.2, fiat transfers are ' +
+          'handled exclusively by the Facilitator.',
+        { tradeId: leg2.id, pairId, amount: sellerAmountUsd, section: '4.2', type: 'cross_facilitator' },
+      ),
+    ]);
+  }
+
   async getSettlementStatus(settlementId: string): Promise<QPointSettlement> {
     const s = await this.repo.findOne({ where: { id: settlementId } });
     if (!s) throw new Error(`Settlement ${settlementId} not found`);

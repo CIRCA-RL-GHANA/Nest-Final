@@ -8,8 +8,9 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { User } from '../../../users/entities/user.entity';
+import { FacilitatorProvider } from '../services/payment-facilitator.service';
 
 export enum QPointOrderType {
   BUY = 'buy',
@@ -60,6 +61,16 @@ export class QPointOrder {
   @ApiProperty({ enum: QPointOrderStatus })
   @Column({ type: 'text', default: QPointOrderStatus.OPEN })
   status: QPointOrderStatus;
+
+  /**
+   * The payment facilitator linked to this order.
+   * Used to route cross-facilitator trades through the AI bridge.
+   * Null = facilitator-agnostic (AI Participant's non-bridge orders).
+   */
+  @ApiPropertyOptional({ description: 'Payment facilitator for this order (for cross-facilitator routing)' })
+  @Column({ name: 'facilitator_id', type: 'varchar', length: 32, nullable: true })
+  @Index('idx_qpo_facilitator')
+  facilitatorId?: FacilitatorProvider;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp with time zone' })
   createdAt: Date;
