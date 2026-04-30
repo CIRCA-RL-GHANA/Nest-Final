@@ -7,11 +7,14 @@ import {
   Param,
   Query,
   Req,
+  Headers,
   UseGuards,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
   BadRequestException,
+  ParseIntPipe,
+  DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Request } from 'express';
@@ -31,6 +34,7 @@ import { QPointsTosService } from './services/qpoints-tos.service';
 import { CrossFacilitatorEngineService } from './services/cross-facilitator-engine.service';
 import { NettingEngineService } from './services/netting-engine.service';
 import { FacilitatorBalanceService } from './services/facilitator-balance.service';
+import { FacilitatorTransactionService } from './services/facilitator-transaction.service';
 import { NettingTaskStatus } from './entities/netting-task.entity';
 import { QPointsTosGuard, SkipTosCheck } from './guards/qpoints-tos.guard';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -38,6 +42,8 @@ import { CashQuantityDto } from './dto/cash-quantity.dto';
 import { ReadNotificationsDto } from './dto/read-notifications.dto';
 import { RegisterFacilitatorAccountDto } from './dto/register-facilitator-account.dto';
 import { AcceptQPointsTosDto } from './dto/accept-tos.dto';
+import { CreateDepositDto } from './dto/create-deposit.dto';
+import { CreateWithdrawalDto } from './dto/create-withdrawal.dto';
 
 function userId(req: Request): string {
   return (req as Request & { user: { id: string } }).user.id;
@@ -71,6 +77,7 @@ export class QPointsMarketController {
     private readonly crossFacilitatorEngine: CrossFacilitatorEngineService,
     private readonly nettingEngine: NettingEngineService,
     private readonly facilitatorBalance: FacilitatorBalanceService,
+    private readonly facilitatorTx: FacilitatorTransactionService,
   ) {}
 
   // ---------------------------------------------------------------------- tos
@@ -889,5 +896,169 @@ export class QPointsMarketController {
   async triggerNettingRun() {
     await this.nettingEngine.triggerManualNettingRun();
     return { success: true, message: 'Netting engine run triggered. Check tasks for results.' };
+  }
+
+  // ---------------------------------------------------------------------- deposits (on-ramp)
+
+  /**
+   * POST /qpoints/payment/deposit
+   *
+   * Initiates a deposit into the caller's facilitator account.
+   * For redirect-based providers (Stripe, Paystack, Flutterwave) a checkoutUrl
+   * is returned — the frontend must open this in the system browser.
+   * For push-based providers (MTN MoMo, M-Pesa) the user gets a prompt on their
+   * mobile device; no URL is returned.
+   */
+  @Post('payment/deposit')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Initiate a deposit (on-ramp) into your facilitator account' })
+  async createDeposit(@Req() req: Request, @Body() dto: CreateDepositDto) {
+    return this.facilitatorTx.createDeposit(userId(req as any), dto.amount, dto.currency);
+  }
+
+  // ---------------------------------------------------------------------- withdrawals (off-ramp)
+
+  /**
+   * POST /qpoints/payment/withdraw
+   *
+   * Initiates a payout from the caller's facilitator account to their bank.
+   * Result is asynchronous — final status arrives via the provider webhook.
+   */
+  @Post('payment/withdraw')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Initiate a withdrawal (off-ramp) from your facilitator account' })
+  async createWithdrawal(@Req() req: Request, @Body() dto: CreateWithdrawalDto) {
+    return this.facilitatorTx.createWithdrawal(
+      userId(req as any),
+      dto.amount,
+      dto.currency,
+      dto.payoutMethodId,
+    );
+  }
+
+  // ---------------------------------------------------------------------- transaction history
+
+  /**
+   * GET /qpoints/payment/transactions
+   *
+   * Returns the caller's deposit/withdrawal history (most recent first).
+   */
+  @Get('payment/transactions')
+  @ApiOperation({ summary: 'List your deposit and withdrawal transactions' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Max records (default 20, max 100)' })
+  @ApiQuery({ name: 'offset', required: false, description: 'Pagination offset (default 0)' })
+  async listTransactions(
+    @Req() req: Request,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset: number,
+  ) {
+    return this.facilitatorTx.getUserTransactions(userId(req as any), limit, offset);
+  }
+
+  /**
+   * GET /qpoints/payment/transactions/:id
+   *
+   * Returns a single transaction by ID (must belong to the caller).
+   */
+  @Get('payment/transactions/:id')
+  @ApiOperation({ summary: 'Get a single transaction by ID' })
+  async getTransaction(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.facilitatorTx.getTransaction(id, userId(req as any));
+  }
+
+  // ---------------------------------------------------------------------- webhook receivers
+
+  /**
+   * POST /qpoints/webhook/stripe
+   *
+   * Stripe sends events here.  Raw body required for signature verification.
+   * Must have `rawBody: true` in NestFactory.create() options.
+   */
+  @Post('webhook/stripe')
+  @SkipTosCheck()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[Webhook] Stripe payment events receiver' })
+  async stripeWebhook(
+    @Req() req: any,
+    @Headers('stripe-signature') sig: string,
+  ) {
+    if (!sig) throw new BadRequestException('Missing stripe-signature header');
+    await this.facilitatorTx.handleStripeWebhook(
+      req.rawBody ?? Buffer.from(JSON.stringify(req.body)),
+      sig,
+    );
+    return { received: true };
+  }
+
+  /**
+   * POST /qpoints/webhook/paystack
+   *
+   * Paystack sends events here.  Verified via X-Paystack-Signature (HMAC-SHA512).
+   */
+  @Post('webhook/paystack')
+  @SkipTosCheck()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[Webhook] Paystack payment events receiver' })
+  async paystackWebhook(
+    @Req() req: any,
+    @Headers('x-paystack-signature') sig: string,
+  ) {
+    if (!sig) throw new BadRequestException('Missing x-paystack-signature header');
+    await this.facilitatorTx.handlePaystackWebhook(
+      req.rawBody ?? Buffer.from(JSON.stringify(req.body)),
+      sig,
+    );
+    return { received: true };
+  }
+
+  /**
+   * POST /qpoints/webhook/flutterwave
+   *
+   * Flutterwave sends events here.  Verified via verif-hash header.
+   */
+  @Post('webhook/flutterwave')
+  @SkipTosCheck()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[Webhook] Flutterwave payment events receiver' })
+  async flutterwaveWebhook(
+    @Req() req: any,
+    @Headers('verif-hash') secretHash: string,
+  ) {
+    await this.facilitatorTx.handleFlutterwaveWebhook(req.body, secretHash ?? '');
+    return { received: true };
+  }
+
+  /**
+   * POST /qpoints/webhook/mtn-momo
+   *
+   * MTN MoMo sends payment notification callbacks here.
+   */
+  @Post('webhook/mtn-momo')
+  @SkipTosCheck()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[Webhook] MTN MoMo payment notification receiver' })
+  async mtnMomoWebhook(
+    @Req() req: any,
+    @Headers('x-callback-url') _callbackUrl: string,
+  ) {
+    await this.facilitatorTx.handleMtnMomoWebhook(req.body);
+    return { received: true };
+  }
+
+  /**
+   * POST /qpoints/webhook/mpesa
+   *
+   * Safaricom M-Pesa sends STK Push and B2C result callbacks here.
+   */
+  @Post('webhook/mpesa')
+  @SkipTosCheck()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[Webhook] M-Pesa STK Push / B2C result receiver' })
+  async mpesaWebhook(@Req() req: any) {
+    await this.facilitatorTx.handleMpesaWebhook(req.body);
+    return { received: true };
   }
 }

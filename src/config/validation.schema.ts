@@ -116,4 +116,25 @@ export const validationSchema = Joi.object({
   // Cross-facilitator bridge
   AI_BRIDGE_MIN_RESERVE_USD: Joi.number().min(0).default(10000),
   AI_BRIDGE_REBALANCING_THRESHOLD_USD: Joi.number().min(0).default(5000),
+
+  // On-Ramp / Off-Ramp
+  DEPOSIT_DAILY_LIMIT_USD: Joi.number().min(0).default(10000),
+  WITHDRAW_DAILY_LIMIT_USD: Joi.number().min(0).default(5000),
+  MIN_DEPOSIT_AMOUNT_USD: Joi.number().min(0).default(1),
+  MIN_WITHDRAW_AMOUNT_USD: Joi.number().min(0).default(5),
+  DEPOSIT_RETURN_URL: Joi.string().uri().allow('').default('https://app.genieinprompt.app/deposit'),
+  STRIPE_SECRET_KEY: Joi.string().allow('').default(''),
+  STRIPE_WEBHOOK_SECRET: Joi.string().allow('').default(''),
+  FLUTTERWAVE_WEBHOOK_HASH: Joi.string().allow('').default(''),
+  MPESA_CONSUMER_KEY: Joi.string().allow('').default(''),
+  MPESA_CONSUMER_SECRET: Joi.string().allow('').default(''),
+  MPESA_SHORTCODE: Joi.string().allow('').default(''),
+  MPESA_PASSKEY: Joi.string().allow('').default(''),
+  MPESA_CALLBACK_URL: Joi.string().uri().allow('').default(''),
+  MPESA_B2C_INITIATOR: Joi.string().allow('').default(''),
+  MPESA_B2C_CREDENTIAL: Joi.string().allow('').default(''),
+  MTN_MOMO_API_KEY: Joi.string().allow('').default(''),
+  MTN_MOMO_USER_ID: Joi.string().allow('').default(''),
+  MTN_MOMO_WEBHOOK_SECRET: Joi.string().allow('').default(''),
+  WISE_API_KEY: Joi.string().allow('').default(''),
 });

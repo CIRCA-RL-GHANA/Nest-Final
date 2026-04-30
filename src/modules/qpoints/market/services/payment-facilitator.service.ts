@@ -917,4 +917,558 @@ export class PaymentFacilitatorService {
     }
     return err instanceof Error ? err.message : String(err);
   }
+
+  // =========================================================================
+  // Deposit (On-Ramp) — createDepositSession
+  // =========================================================================
+  //
+  // Returns { checkoutUrl, clientSecret, externalId }.
+  //   checkoutUrl  – hosted checkout page the user opens in a browser
+  //   clientSecret – Stripe PaymentIntent secret (for native SDK, may be null)
+  //   externalId   – the provider's transaction / session / reference ID
+
+  async createDepositSession(
+    userId: string,
+    externalAccountId: string,
+    amount: number,
+    currency: string,
+    provider: FacilitatorProvider,
+    idempotencyKey: string,
+  ): Promise<{ checkoutUrl: string | null; clientSecret: string | null; externalId: string }> {
+    const cfg = this.providerConfigs.get(provider);
+    switch (provider) {
+      case 'stripe':
+        return this._stripeCreateDeposit(externalAccountId, amount, currency, idempotencyKey, cfg?.secretKey);
+      case 'paystack':
+        return this._paystackCreateDeposit(userId, amount, currency, idempotencyKey, cfg?.secretKey);
+      case 'flutterwave':
+        return this._flutterwaveCreateDeposit(userId, amount, currency, idempotencyKey, cfg?.secretKey);
+      case 'mtn_momo':
+        return this._mtnMomoCreateDeposit(externalAccountId, amount, currency, idempotencyKey, cfg);
+      case 'mpesa':
+        return this._mpesaCreateDeposit(externalAccountId, amount, idempotencyKey, cfg);
+      case 'wise':
+        throw new BadRequestException('Wise does not support direct deposits. Use a bank transfer to your Wise USD balance and the platform will be notified via webhook.');
+      case 'mock':
+      default:
+        return {
+          checkoutUrl: `https://mock.checkout.genieinprompt.app/deposit?ref=${idempotencyKey}&amount=${amount}`,
+          clientSecret: null,
+          externalId: `mock_dep_${idempotencyKey}`,
+        };
+    }
+  }
+
+  private async _stripeCreateDeposit(
+    connectedAccountId: string,
+    amount: number,
+    currency: string,
+    idempotencyKey: string,
+    secretKey?: string,
+  ): Promise<{ checkoutUrl: string | null; clientSecret: string | null; externalId: string }> {
+    const key = secretKey ?? this.config.get<string>('payments.stripe.secretKey');
+    if (!key) throw new BadRequestException('Stripe credentials not configured.');
+
+    const returnBase = this.config.get<string>('payments.depositReturnUrl') ?? 'https://app.genieinprompt.app/deposit';
+
+    const params = new URLSearchParams({
+      mode: 'payment',
+      'payment_method_types[]': 'card',
+      'line_items[0][price_data][currency]': currency.toLowerCase(),
+      'line_items[0][price_data][product_data][name]': 'Account Deposit',
+      'line_items[0][price_data][unit_amount]': String(Math.round(amount * 100)),
+      'line_items[0][quantity]': '1',
+      'payment_intent_data[transfer_data][destination]': connectedAccountId,
+      'success_url': `${returnBase}/success?ref=${idempotencyKey}`,
+      'cancel_url': `${returnBase}/cancel?ref=${idempotencyKey}`,
+      'client_reference_id': idempotencyKey,
+    });
+
+    const res = await axios.post<{ id: string; url: string }>(
+      'https://api.stripe.com/v1/checkout/sessions',
+      params.toString(),
+      {
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Idempotency-Key': idempotencyKey,
+        },
+        timeout: 15_000,
+      },
+    );
+    return { checkoutUrl: res.data.url, clientSecret: null, externalId: res.data.id };
+  }
+
+  private async _paystackCreateDeposit(
+    userId: string,
+    amount: number,
+    currency: string,
+    idempotencyKey: string,
+    secretKey?: string,
+  ): Promise<{ checkoutUrl: string | null; clientSecret: string | null; externalId: string }> {
+    const key = secretKey ?? this.config.get<string>('payments.paystack.secretKey');
+    if (!key) throw new BadRequestException('Paystack credentials not configured.');
+
+    const returnUrl = this.config.get<string>('payments.depositReturnUrl') ?? 'https://app.genieinprompt.app/deposit';
+
+    const res = await axios.post<{
+      status: boolean;
+      data: { authorization_url: string; reference: string };
+    }>(
+      'https://api.paystack.co/transaction/initialize',
+      {
+        email: `${userId}@platform.genieinprompt.app`,
+        amount: Math.round(amount * 100), // kobo
+        currency: currency.toUpperCase(),
+        reference: idempotencyKey.replace(/:/g, '-').slice(0, 100),
+        callback_url: `${returnUrl}/success`,
+        channels: ['card', 'bank', 'mobile_money'],
+        metadata: { platform_user_id: userId, idempotency_key: idempotencyKey },
+      },
+      {
+        headers: { Authorization: `Bearer ${key}` },
+        timeout: 15_000,
+      },
+    );
+
+    if (!res.data.status) throw new BadRequestException('Paystack deposit initialization failed.');
+
+    return {
+      checkoutUrl: res.data.data.authorization_url,
+      clientSecret: null,
+      externalId: res.data.data.reference,
+    };
+  }
+
+  private async _flutterwaveCreateDeposit(
+    userId: string,
+    amount: number,
+    currency: string,
+    idempotencyKey: string,
+    secretKey?: string,
+  ): Promise<{ checkoutUrl: string | null; clientSecret: string | null; externalId: string }> {
+    const key = secretKey ?? this.config.get<string>('payments.flutterwave.secretKey');
+    if (!key) throw new BadRequestException('Flutterwave credentials not configured.');
+
+    const returnUrl = this.config.get<string>('payments.depositReturnUrl') ?? 'https://app.genieinprompt.app/deposit';
+
+    const txRef = idempotencyKey.replace(/:/g, '-').slice(0, 100);
+    const res = await axios.post<{ status: string; data: { link: string } }>(
+      'https://api.flutterwave.com/v3/payments',
+      {
+        tx_ref: txRef,
+        amount,
+        currency: currency.toUpperCase(),
+        redirect_url: `${returnUrl}/success`,
+        customer: {
+          email: `${userId}@platform.genieinprompt.app`,
+          name: `Platform User ${userId.slice(0, 8)}`,
+        },
+        customizations: {
+          title: 'PROMPT Genie Deposit',
+          description: `Deposit $${amount} to your PROMPT Genie account`,
+        },
+        meta: { platform_user_id: userId, idempotency_key: idempotencyKey },
+      },
+      {
+        headers: { Authorization: `Bearer ${key}` },
+        timeout: 15_000,
+      },
+    );
+
+    if (res.data.status !== 'success') throw new BadRequestException('Flutterwave deposit initialization failed.');
+
+    return {
+      checkoutUrl: res.data.data.link,
+      clientSecret: null,
+      externalId: txRef,
+    };
+  }
+
+  private async _mtnMomoCreateDeposit(
+    phoneNumber: string,
+    amount: number,
+    currency: string,
+    idempotencyKey: string,
+    cfg?: { apiKey?: string; baseUrl?: string },
+  ): Promise<{ checkoutUrl: string | null; clientSecret: string | null; externalId: string }> {
+    const apiKey = cfg?.apiKey ?? this.config.get<string>('payments.mtnMomo.apiKey');
+    const momoUserId = this.config.get<string>('payments.mtnMomo.userId');
+    const baseUrl = cfg?.baseUrl ?? 'https://sandbox.momodeveloper.mtn.com';
+
+    if (!apiKey || !momoUserId) throw new BadRequestException('MTN MoMo credentials not configured.');
+
+    // Obtain access token
+    const tokenRes = await axios.post<{ access_token: string }>(
+      `${baseUrl}/collection/token/`,
+      {},
+      {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${momoUserId}:${apiKey}`).toString('base64')}`,
+          'Ocp-Apim-Subscription-Key': apiKey,
+        },
+        timeout: 10_000,
+      },
+    );
+    const token = tokenRes.data?.access_token;
+    if (!token) throw new BadRequestException('MTN MoMo token exchange failed.');
+
+    const referenceId = idempotencyKey.replace(/[^a-f0-9-]/g, '').slice(0, 36);
+
+    // Initiate Request to Pay (async — webhook delivers result)
+    await axios.post(
+      `${baseUrl}/collection/v1_0/requesttopay`,
+      {
+        amount: String(Math.round(amount * 100) / 100),
+        currency: currency.toUpperCase(),
+        externalId: referenceId,
+        payer: { partyIdType: 'MSISDN', partyId: phoneNumber },
+        payerMessage: 'PROMPT Genie deposit',
+        payeeNote: `Ref: ${referenceId}`,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Ocp-Apim-Subscription-Key': apiKey,
+          'X-Reference-Id': referenceId,
+          'X-Target-Environment': baseUrl.includes('sandbox') ? 'sandbox' : 'mtncongo',
+          'Content-Type': 'application/json',
+        },
+        timeout: 15_000,
+      },
+    );
+
+    return { checkoutUrl: null, clientSecret: null, externalId: referenceId };
+  }
+
+  private async _mpesaCreateDeposit(
+    phoneNumber: string,
+    amount: number,
+    idempotencyKey: string,
+    cfg?: { consumerKey?: string; consumerSecret?: string; baseUrl?: string },
+  ): Promise<{ checkoutUrl: string | null; clientSecret: string | null; externalId: string }> {
+    const consumerKey = cfg?.consumerKey ?? this.config.get<string>('payments.mpesa.consumerKey');
+    const consumerSecret = cfg?.consumerSecret ?? this.config.get<string>('payments.mpesa.consumerSecret');
+    const shortcode = this.config.get<string>('payments.mpesa.shortcode') ?? '';
+    const passkey = this.config.get<string>('payments.mpesa.passkey') ?? '';
+    const callbackUrl = this.config.get<string>('payments.mpesa.callbackUrl') ?? '';
+    const baseUrl = cfg?.baseUrl ?? 'https://api.safaricom.co.ke';
+
+    if (!consumerKey || !consumerSecret) throw new BadRequestException('M-Pesa credentials not configured.');
+
+    // Step 1: OAuth token
+    const tokenRes = await axios.get<{ access_token: string }>(
+      `${baseUrl}/oauth/v1/generate?grant_type=client_credentials`,
+      {
+        auth: { username: consumerKey, password: consumerSecret },
+        timeout: 10_000,
+      },
+    );
+    const token = tokenRes.data?.access_token;
+    if (!token) throw new BadRequestException('M-Pesa token fetch failed.');
+
+    // Step 2: STK Push
+    const timestamp = new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14);
+    const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString('base64');
+    const checkoutRequestId = idempotencyKey.slice(0, 36);
+
+    const res = await axios.post<{ CheckoutRequestID: string; ResponseCode: string }>(
+      `${baseUrl}/mpesa/stkpush/v1/processrequest`,
+      {
+        BusinessShortCode: shortcode,
+        Password: password,
+        Timestamp: timestamp,
+        TransactionType: 'CustomerPayBillOnline',
+        Amount: Math.round(amount),
+        PartyA: phoneNumber,
+        PartyB: shortcode,
+        PhoneNumber: phoneNumber,
+        CallBackURL: callbackUrl,
+        AccountReference: checkoutRequestId,
+        TransactionDesc: 'PROMPT Genie Deposit',
+      },
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 15_000,
+      },
+    );
+
+    if (res.data?.ResponseCode !== '0') throw new BadRequestException('M-Pesa STK Push failed.');
+
+    return { checkoutUrl: null, clientSecret: null, externalId: res.data.CheckoutRequestID };
+  }
+
+  // =========================================================================
+  // Withdrawal (Off-Ramp) — createWithdrawalPayout
+  // =========================================================================
+
+  async createWithdrawalPayout(
+    userId: string,
+    externalAccountId: string,
+    amount: number,
+    currency: string,
+    provider: FacilitatorProvider,
+    payoutMethodId: string,
+    idempotencyKey: string,
+  ): Promise<{ externalId: string }> {
+    const cfg = this.providerConfigs.get(provider);
+    switch (provider) {
+      case 'stripe':
+        return this._stripeCreatePayout(externalAccountId, amount, currency, payoutMethodId, idempotencyKey, cfg?.secretKey);
+      case 'paystack':
+        return this._paystackCreateTransfer(amount, currency, payoutMethodId, idempotencyKey, cfg?.secretKey);
+      case 'flutterwave':
+        return this._flutterwaveCreateTransfer(amount, currency, payoutMethodId, idempotencyKey, cfg?.secretKey);
+      case 'mtn_momo':
+        return this._mtnMomoCreateDisbursement(payoutMethodId, amount, currency, idempotencyKey, cfg);
+      case 'mpesa':
+        return this._mpesaCreateB2C(payoutMethodId, amount, idempotencyKey, cfg);
+      case 'wise':
+        return this._wiseCreateTransfer(amount, currency, payoutMethodId, idempotencyKey, cfg?.apiKey);
+      case 'mock':
+      default:
+        return { externalId: `mock_payout_${idempotencyKey}` };
+    }
+  }
+
+  private async _stripeCreatePayout(
+    connectedAccountId: string,
+    amount: number,
+    currency: string,
+    destination: string,
+    idempotencyKey: string,
+    secretKey?: string,
+  ): Promise<{ externalId: string }> {
+    const key = secretKey ?? this.config.get<string>('payments.stripe.secretKey');
+    if (!key) throw new BadRequestException('Stripe credentials not configured.');
+
+    const params = new URLSearchParams({
+      amount: String(Math.round(amount * 100)),
+      currency: currency.toLowerCase(),
+      destination,
+    });
+
+    const res = await axios.post<{ id: string }>(
+      'https://api.stripe.com/v1/payouts',
+      params.toString(),
+      {
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Stripe-Account': connectedAccountId,
+          'Idempotency-Key': idempotencyKey,
+        },
+        timeout: 15_000,
+      },
+    );
+    return { externalId: res.data.id };
+  }
+
+  private async _paystackCreateTransfer(
+    amount: number,
+    currency: string,
+    recipientCode: string,
+    idempotencyKey: string,
+    secretKey?: string,
+  ): Promise<{ externalId: string }> {
+    const key = secretKey ?? this.config.get<string>('payments.paystack.secretKey');
+    if (!key) throw new BadRequestException('Paystack credentials not configured.');
+
+    const ref = idempotencyKey.replace(/:/g, '-').slice(0, 100);
+    const res = await axios.post<{ status: boolean; data: { transfer_code: string } }>(
+      'https://api.paystack.co/transfer',
+      {
+        source: 'balance',
+        amount: Math.round(amount * 100),
+        recipient: recipientCode,
+        reason: 'PROMPT Genie withdrawal',
+        reference: ref,
+        currency: currency.toUpperCase(),
+      },
+      {
+        headers: { Authorization: `Bearer ${key}` },
+        timeout: 15_000,
+      },
+    );
+    if (!res.data.status) throw new BadRequestException('Paystack transfer initiation failed.');
+    return { externalId: res.data.data.transfer_code };
+  }
+
+  private async _flutterwaveCreateTransfer(
+    amount: number,
+    currency: string,
+    recipientComposite: string,
+    idempotencyKey: string,
+    secretKey?: string,
+  ): Promise<{ externalId: string }> {
+    const key = secretKey ?? this.config.get<string>('payments.flutterwave.secretKey');
+    if (!key) throw new BadRequestException('Flutterwave credentials not configured.');
+
+    const [bankCode, accountNumber] = recipientComposite.split('|');
+    const ref = idempotencyKey.replace(/:/g, '-').slice(0, 100);
+
+    const res = await axios.post<{ status: string; data: { id: number } }>(
+      'https://api.flutterwave.com/v3/transfers',
+      {
+        account_bank: bankCode,
+        account_number: accountNumber,
+        amount,
+        narration: 'PROMPT Genie withdrawal',
+        currency: currency.toUpperCase(),
+        reference: ref,
+        debit_currency: currency.toUpperCase(),
+      },
+      {
+        headers: { Authorization: `Bearer ${key}` },
+        timeout: 15_000,
+      },
+    );
+    if (res.data.status !== 'success') throw new BadRequestException('Flutterwave transfer initiation failed.');
+    return { externalId: String(res.data.data.id) };
+  }
+
+  private async _mtnMomoCreateDisbursement(
+    phoneNumber: string,
+    amount: number,
+    currency: string,
+    idempotencyKey: string,
+    cfg?: { apiKey?: string; baseUrl?: string },
+  ): Promise<{ externalId: string }> {
+    const apiKey = cfg?.apiKey ?? this.config.get<string>('payments.mtnMomo.apiKey');
+    const momoUserId = this.config.get<string>('payments.mtnMomo.userId');
+    const baseUrl = cfg?.baseUrl ?? 'https://sandbox.momodeveloper.mtn.com';
+
+    if (!apiKey || !momoUserId) throw new BadRequestException('MTN MoMo credentials not configured.');
+
+    const tokenRes = await axios.post<{ access_token: string }>(
+      `${baseUrl}/disbursement/token/`,
+      {},
+      {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${momoUserId}:${apiKey}`).toString('base64')}`,
+          'Ocp-Apim-Subscription-Key': apiKey,
+        },
+        timeout: 10_000,
+      },
+    );
+    const token = tokenRes.data?.access_token;
+    if (!token) throw new BadRequestException('MTN MoMo token exchange failed.');
+
+    const referenceId = idempotencyKey.replace(/[^a-f0-9-]/g, '').slice(0, 36);
+
+    await axios.post(
+      `${baseUrl}/disbursement/v1_0/transfer`,
+      {
+        amount: String(amount),
+        currency: currency.toUpperCase(),
+        externalId: referenceId,
+        payee: { partyIdType: 'MSISDN', partyId: phoneNumber },
+        payerMessage: 'PROMPT Genie withdrawal',
+        payeeNote: `Ref: ${referenceId}`,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Ocp-Apim-Subscription-Key': apiKey,
+          'X-Reference-Id': referenceId,
+          'X-Target-Environment': baseUrl.includes('sandbox') ? 'sandbox' : 'mtncongo',
+        },
+        timeout: 15_000,
+      },
+    );
+    return { externalId: referenceId };
+  }
+
+  private async _mpesaCreateB2C(
+    phoneNumber: string,
+    amount: number,
+    idempotencyKey: string,
+    cfg?: { consumerKey?: string; consumerSecret?: string; baseUrl?: string },
+  ): Promise<{ externalId: string }> {
+    const consumerKey = cfg?.consumerKey ?? this.config.get<string>('payments.mpesa.consumerKey');
+    const consumerSecret = cfg?.consumerSecret ?? this.config.get<string>('payments.mpesa.consumerSecret');
+    const initiatorName = this.config.get<string>('payments.mpesa.b2cInitiator') ?? '';
+    const credential = this.config.get<string>('payments.mpesa.b2cCredential') ?? '';
+    const shortcode = this.config.get<string>('payments.mpesa.shortcode') ?? '';
+    const callbackUrl = this.config.get<string>('payments.mpesa.callbackUrl') ?? '';
+    const baseUrl = cfg?.baseUrl ?? 'https://api.safaricom.co.ke';
+
+    if (!consumerKey || !consumerSecret) throw new BadRequestException('M-Pesa credentials not configured.');
+
+    const tokenRes = await axios.get<{ access_token: string }>(
+      `${baseUrl}/oauth/v1/generate?grant_type=client_credentials`,
+      { auth: { username: consumerKey, password: consumerSecret }, timeout: 10_000 },
+    );
+    const token = tokenRes.data?.access_token;
+    if (!token) throw new BadRequestException('M-Pesa token fetch failed.');
+
+    const res = await axios.post<{ ConversationID: string; ResponseCode: string }>(
+      `${baseUrl}/mpesa/b2c/v1/paymentrequest`,
+      {
+        InitiatorName: initiatorName,
+        SecurityCredential: credential,
+        CommandID: 'BusinessPayment',
+        Amount: Math.round(amount),
+        PartyA: shortcode,
+        PartyB: phoneNumber,
+        Remarks: 'PROMPT Genie withdrawal',
+        QueueTimeOutURL: callbackUrl,
+        ResultURL: callbackUrl,
+        Occasion: idempotencyKey.slice(0, 100),
+      },
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 15_000 },
+    );
+
+    if (res.data?.ResponseCode !== '0') throw new BadRequestException('M-Pesa B2C initiation failed.');
+    return { externalId: res.data.ConversationID };
+  }
+
+  private async _wiseCreateTransfer(
+    amount: number,
+    currency: string,
+    recipientAccountId: string,
+    idempotencyKey: string,
+    apiKey?: string,
+  ): Promise<{ externalId: string }> {
+    const key = apiKey ?? this.config.get<string>('payments.wise.apiKey');
+    if (!key) throw new BadRequestException('Wise credentials not configured.');
+
+    const authHeader = { Authorization: `Bearer ${key}` };
+
+    // Step 1: Resolve profile
+    const profileRes = await axios.get<{ id: number; type: string }[]>(
+      'https://api.wise.com/v1/profiles',
+      { headers: authHeader, timeout: 10_000 },
+    );
+    const profile = profileRes.data?.find((p) => p.type === 'business') ?? profileRes.data?.[0];
+    if (!profile) throw new BadRequestException('No Wise profile found.');
+
+    // Step 2: Create a quote
+    const quoteRes = await axios.post<{ id: string }>(
+      `https://api.wise.com/v3/profiles/${profile.id}/quotes`,
+      { sourceCurrency: currency.toUpperCase(), targetCurrency: currency.toUpperCase(), targetAmount: amount },
+      { headers: authHeader, timeout: 10_000 },
+    );
+
+    // Step 3: Create the transfer
+    const transferRes = await axios.post<{ id: number }>(
+      'https://api.wise.com/v1/transfers',
+      {
+        targetAccount: recipientAccountId,
+        quoteUuid: quoteRes.data.id,
+        customerTransactionId: idempotencyKey.slice(0, 36),
+        details: { reference: 'PROMPT Genie withdrawal' },
+      },
+      { headers: authHeader, timeout: 10_000 },
+    );
+
+    // Step 4: Fund the transfer
+    await axios.post(
+      `https://api.wise.com/v3/profiles/${profile.id}/transfers/${transferRes.data.id}/payments`,
+      { type: 'BALANCE' },
+      { headers: authHeader, timeout: 10_000 },
+    );
+
+    return { externalId: String(transferRes.data.id) };
+  }
 }

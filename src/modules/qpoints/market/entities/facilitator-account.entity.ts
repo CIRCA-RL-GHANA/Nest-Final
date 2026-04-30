@@ -52,6 +52,18 @@ export class FacilitatorAccount {
   @Column({ type: 'jsonb', nullable: true })
   metadata?: Record<string, unknown>;
 
+  /**
+   * The provider-issued payout destination used for withdrawals.
+   * For Stripe: "ba_..." (bank account ID on the connected account).
+   * For Paystack: recipient_code (e.g. "RCP_...").
+   * For Flutterwave: "bankCode|accountNumber".
+   * For MTN MoMo / M-Pesa: phone number in international format.
+   * For Wise: profileId or recipient account ID.
+   * Populated at registration via meta.payoutMethodId or updated separately.
+   */
+  @Column({ name: 'default_payout_method_id', type: 'varchar', length: 255, nullable: true })
+  defaultPayoutMethodId?: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

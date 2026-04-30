@@ -137,5 +137,41 @@ export const configuration = () => ({
     webhookSecret: process.env.PAYMENT_FACILITATOR_WEBHOOK_SECRET ?? '',
     facilitatorCurrency: process.env.PAYMENT_FACILITATOR_CURRENCY ?? 'GHS',
     facilitatorWebhookUrl: process.env.PAYMENT_FACILITATOR_WEBHOOK_URL ?? '',
+
+    // On-Ramp / Off-Ramp limits & keys
+    dailyDepositLimit: +(process.env.DEPOSIT_DAILY_LIMIT_USD ?? 10000),
+    dailyWithdrawLimit: +(process.env.WITHDRAW_DAILY_LIMIT_USD ?? 5000),
+    minDepositAmount: +(process.env.MIN_DEPOSIT_AMOUNT_USD ?? 1),
+    minWithdrawAmount: +(process.env.MIN_WITHDRAW_AMOUNT_USD ?? 5),
+    depositReturnUrl: process.env.DEPOSIT_RETURN_URL ?? 'https://app.genieinprompt.app/deposit',
+
+    stripe: {
+      secretKey: process.env.STRIPE_SECRET_KEY ?? '',
+      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
+    },
+    flutterwave: {
+      secretKey: process.env.PAYMENT_FACILITATOR_SECRET_KEY ?? '',
+      webhookHash: process.env.FLUTTERWAVE_WEBHOOK_HASH ?? '',
+    },
+    paystack: {
+      secretKey: process.env.PAYMENT_FACILITATOR_SECRET_KEY ?? '',
+    },
+    mpesa: {
+      consumerKey: process.env.MPESA_CONSUMER_KEY ?? '',
+      consumerSecret: process.env.MPESA_CONSUMER_SECRET ?? '',
+      shortcode: process.env.MPESA_SHORTCODE ?? '',
+      passkey: process.env.MPESA_PASSKEY ?? '',
+      callbackUrl: process.env.MPESA_CALLBACK_URL ?? '',
+      b2cInitiator: process.env.MPESA_B2C_INITIATOR ?? '',
+      b2cCredential: process.env.MPESA_B2C_CREDENTIAL ?? '',
+    },
+    mtnMomo: {
+      apiKey: process.env.MTN_MOMO_API_KEY ?? '',
+      userId: process.env.MTN_MOMO_USER_ID ?? '',
+      webhookSecret: process.env.MTN_MOMO_WEBHOOK_SECRET ?? '',
+    },
+    wise: {
+      apiKey: process.env.WISE_API_KEY ?? '',
+    },
   },
 });
