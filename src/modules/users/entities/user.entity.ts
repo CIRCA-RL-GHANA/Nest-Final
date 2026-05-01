@@ -6,6 +6,15 @@ import { BaseEntity } from '@/common/entities/base.entity';
 export enum UserRole {
   ADMIN = 'admin',
   USER = 'user',
+  // ── Financial Institution roles ──────────────────────────────────────────
+  /** Top-level FI entity owner: full access to loans, deposits, insurance, credit-data. */
+  FINANCIAL_INSTITUTION = 'financial_institution',
+  /** FI staff: can read & create/approve loans. */
+  FI_LOAN_OFFICER = 'fi_loan_officer',
+  /** FI staff: teller / deposit & insurance processing. */
+  FI_TELLER = 'fi_teller',
+  /** FI staff: read-only auditor. */
+  FI_AUDITOR = 'fi_auditor',
 }
 
 @Entity('users')

@@ -11,6 +11,16 @@ export enum TransactionType {
   REWARD = 'Reward',
   FEE = 'Fee',
   PENALTY = 'Penalty',
+  // ── Financial Institution Extension ──────────────────────────────────────
+  LOAN_DISBURSEMENT = 'LoanDisbursement',
+  LOAN_REPAYMENT = 'LoanRepayment',
+  LOAN_ORIGINATION_FEE = 'LoanOriginationFee',
+  DEPOSIT_LOCK = 'DepositLock',
+  DEPOSIT_UNLOCK = 'DepositUnlock',
+  DEPOSIT_INTEREST = 'DepositInterest',
+  INSURANCE_PREMIUM = 'InsurancePremium',
+  INSURANCE_CLAIM_PAYOUT = 'InsuranceClaimPayout',
+  CREDIT_DATA_FEE = 'CreditDataFee',
 }
 
 export enum TransactionStatus {

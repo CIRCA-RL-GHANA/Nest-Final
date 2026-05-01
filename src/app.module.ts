@@ -49,6 +49,11 @@ import { QPointsMarketModule } from './modules/qpoints/market/qpoints-market.mod
 import { RevenueModule } from './modules/revenue/revenue.module';
 import { EplayModule } from './modules/eplay/eplay.module';
 import { CommunityModule } from './modules/community/community.module';
+// ── Financial Institution Extension ─────────────────────────────────────────
+import { LoansModule } from './modules/loans/loans.module';
+import { DepositsModule } from './modules/deposits/deposits.module';
+import { InsuranceModule } from './modules/insurance/insurance.module';
+import { CreditDataModule } from './modules/credit-data/credit-data.module';
 
 @Module({
   imports: [
@@ -155,6 +160,11 @@ import { CommunityModule } from './modules/community/community.module';
     RevenueModule,
     EplayModule,
     CommunityModule,
+    // ── Financial Institution Extension ─────────────────────────────────────
+    LoansModule,
+    DepositsModule,
+    InsuranceModule,
+    CreditDataModule,
   ],
   providers: [
     {
