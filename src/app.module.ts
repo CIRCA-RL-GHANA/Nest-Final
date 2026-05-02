@@ -59,6 +59,8 @@ import { EnterpriseModule } from './modules/enterprise/enterprise.module';
 import { MultiChannelModule } from './modules/multi-channel/multi-channel.module';
 import { FulfillmentModule } from './modules/fulfillment/fulfillment.module';
 import { AgenticConciergeModule } from './modules/agentic-concierge/agentic-concierge.module';
+import { FacilitatorInstitutionsModule } from './modules/facilitator-institutions/facilitator-institutions.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -175,6 +177,8 @@ import { AgenticConciergeModule } from './modules/agentic-concierge/agentic-conc
     MultiChannelModule,
     FulfillmentModule,
     AgenticConciergeModule,
+    FacilitatorInstitutionsModule,
+    WebhooksModule,
   ],
   providers: [
     {

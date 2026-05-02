@@ -84,6 +84,18 @@ export class QPointsTransactionService {
   }
 
   /**
+   * Resolve a QPointAccount directly by entityId.
+   * Used by the QP charge pathway (merchant account lookup).
+   */
+  async getAccountByEntityId(entityId: string): Promise<QPointAccount> {
+    const account = await this.accountRepository.findOne({ where: { entityId } });
+    if (!account) {
+      throw new NotFoundException(`No QPoint account found for entity ${entityId}`);
+    }
+    return account;
+  }
+
+  /**
    * Deposit Q-Points into an account
    */
   async deposit(

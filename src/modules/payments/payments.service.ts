@@ -3,8 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Payment, PaymentStatus } from '../entities/payment.entity';
 import { WalletsService } from '../wallets/wallets.service';
-import { CreatePaymentDto } from './dto/create-payment.dto';
+import { CreatePaymentDto, QpChargeDto } from './dto/create-payment.dto';
 import { AIFraudService } from '../ai/services/ai-fraud.service';
+import { QPointsTransactionService } from '../qpoints/qpoints-transaction.service';
 
 @Injectable()
 export class PaymentsService {
@@ -15,6 +16,7 @@ export class PaymentsService {
     private readonly paymentRepository: Repository<Payment>,
     private readonly walletsService: WalletsService,
     private readonly aiFraud: AIFraudService,
+    private readonly qpTx: QPointsTransactionService,
   ) {}
 
   async processPayment(dto: CreatePaymentDto): Promise<Payment> {
@@ -105,4 +107,63 @@ export class PaymentsService {
 
     return payment;
   }
+
+  // ─── Pathway 1: QP Charge ────────────────────────────────────────────────
+  // Deduct Q-Points from a customer and credit the merchant entity.
+  // Zero-commission; optional 0.02 QP trade fee if perTxFeeQp > 0.
+
+  async chargeQp(dto: QpChargeDto): Promise<{
+    transactionId: string;
+    status: string;
+    settledAt: string;
+    qpAmount: number;
+    feeQp: number;
+    merchantQpReceived: number;
+  }> {
+    // Resolve customer's QP account via userId
+    const customerAccount = await this.qpTx.getAccountByUserId(dto.customerId);
+    if (!customerAccount) {
+      throw new NotFoundException(`No QP account found for customer ${dto.customerId}`);
+    }
+
+    // Resolve merchant's QP account via entityId
+    const merchantAccount = await this.qpTx.getAccountByEntityId(dto.merchantEntityId);
+    if (!merchantAccount) {
+      throw new NotFoundException(`No QP account found for merchant entity ${dto.merchantEntityId}`);
+    }
+
+    const feeQp = 0; // zero-commission by default; enterprise settings may apply 0.02
+    const merchantReceives = dto.amount - feeQp;
+
+    // Use the existing transfer service: source = customer, dest = merchant
+    const tx = await this.qpTx.transfer(
+      {
+        sourceAccountId: customerAccount.id,
+        destinationAccountId: merchantAccount.id,
+        amount: dto.amount,
+        description: `QP charge for order ${dto.orderReference ?? 'external'}`,
+        metadata: {
+          source: 'qp_charge',
+          orderReference: dto.orderReference,
+          merchantEntityId: dto.merchantEntityId,
+          ...(dto.metadata ?? {}),
+        },
+      },
+      dto.customerId,
+    );
+
+    this.logger.log(
+      `QP charge: ${dto.amount} QP from customer ${dto.customerId} to merchant ${dto.merchantEntityId}, tx ${tx.id}`,
+    );
+
+    return {
+      transactionId: tx.id,
+      status: 'completed',
+      settledAt: new Date().toISOString(),
+      qpAmount: dto.amount,
+      feeQp,
+      merchantQpReceived: merchantReceives,
+    };
+  }
 }
+
