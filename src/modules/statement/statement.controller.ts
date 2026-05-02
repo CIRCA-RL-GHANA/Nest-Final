@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { StatementService } from './statement.service';
 import { CreateStatementDto, UpdateStatementDto } from './dto';
@@ -8,6 +9,7 @@ import { Statement } from './entities/statement.entity';
 @ApiTags('Statement')
 @Controller('statement')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 export class StatementController {
   constructor(private readonly statementService: StatementService) {}
 

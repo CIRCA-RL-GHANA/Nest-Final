@@ -184,6 +184,14 @@ export class CommunityService {
     await this.communityRepo.decrement({ id: communityId }, 'postCount', 1);
   }
 
+  /** Enterprise brand view — list all communities owned by a specific entityId / userId. */
+  async getByOwner(ownerId: string): Promise<Community[]> {
+    return this.communityRepo.find({
+      where: { ownerId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   private async requireRole(userId: string, communityId: string, allowedRoles: MemberRole[]): Promise<void> {

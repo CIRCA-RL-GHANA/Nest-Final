@@ -13,7 +13,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { FiLicenseGuard } from '../auth/guards/fi-license.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { UserRole } from '../users/entities/user.entity';
 import { LoansService } from './loans.service';
 import { ApplyLoanDto, ApproveLoanDto, RepayLoanDto } from './dto/loans.dto';
 
@@ -24,6 +28,7 @@ import { ApplyLoanDto, ApproveLoanDto, RepayLoanDto } from './dto/loans.dto';
 export class LoansController {
   constructor(private readonly loansService: LoansService) {}
 
+  /** Any authenticated user can apply for a loan. */
   @Post('apply')
   @ApiOperation({ summary: 'User applies for a loan from a specific FI' })
   @HttpCode(HttpStatus.CREATED)
@@ -49,7 +54,13 @@ export class LoansController {
     return this.loansService.getLoanOffers(user.id, parseFloat(amount), purpose);
   }
 
+  /**
+   * FI Loan Officers and FI owners approve loans.
+   * FiLicenseGuard ensures the FI entity has a verified regulatory license.
+   */
   @Patch(':id/approve')
+  @UseGuards(RolesGuard, FiLicenseGuard)
+  @Roles(UserRole.FINANCIAL_INSTITUTION, UserRole.FI_LOAN_OFFICER, UserRole.ADMIN)
   @ApiOperation({ summary: 'FI Loan Officer approves a pending loan application' })
   async approve(
     @CurrentUser() user: any,
@@ -59,7 +70,13 @@ export class LoansController {
     return this.loansService.approveLoan(id, user.id, dto);
   }
 
+  /**
+   * FI Loan Officers and FI owners reject loans.
+   * FiLicenseGuard ensures the FI entity has a verified regulatory license.
+   */
   @Patch(':id/reject')
+  @UseGuards(RolesGuard, FiLicenseGuard)
+  @Roles(UserRole.FINANCIAL_INSTITUTION, UserRole.FI_LOAN_OFFICER, UserRole.ADMIN)
   @ApiOperation({ summary: 'FI Loan Officer rejects a pending loan application' })
   async reject(
     @CurrentUser() user: any,
@@ -69,6 +86,7 @@ export class LoansController {
     return this.loansService.rejectLoan(id, user.id, body.notes);
   }
 
+  /** Any authenticated user can make a manual repayment. */
   @Post(':id/repay')
   @ApiOperation({ summary: 'Manually repay an active loan' })
   @HttpCode(HttpStatus.OK)

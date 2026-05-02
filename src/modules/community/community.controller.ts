@@ -17,6 +17,9 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger'
 import { IsString, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/entities/user.entity';
 import { CommunityService } from './community.service';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -138,5 +141,26 @@ export class CommunityController {
     @Param('postId', ParseUUIDPipe) postId: string,
   ) {
     return this.communityService.removePost(req.user.id, communityId, postId);
+  }
+
+  // ── Enterprise Brand View ────────────────────────────────────────────
+
+  /**
+   * Enterprise admins and platform admins can view all communities
+   * created by/linked to a specific brand entity.
+   */
+  @Get('brand/:entityId')
+  @UseGuards(RolesGuard)
+  @Roles(
+    UserRole.ENTERPRISE_ADMIN,
+    UserRole.ENTERPRISE_OPERATOR,
+    UserRole.ENTERPRISE_VIEWER,
+    UserRole.FINANCIAL_INSTITUTION,
+    UserRole.FI_AUDITOR,
+    UserRole.ADMIN,
+  )
+  @ApiOperation({ summary: '[Enterprise] Get communities owned by/linked to a brand entity' })
+  getBrandCommunities(@Param('entityId', ParseUUIDPipe) entityId: string) {
+    return this.communityService.getByOwner(entityId);
   }
 }

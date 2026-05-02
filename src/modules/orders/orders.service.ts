@@ -373,4 +373,53 @@ export class OrdersService {
       order: { createdAt: 'DESC' },
     });
   }
+
+  // ─── Enterprise order management ─────────────────────────────────────────
+
+  /**
+   * Get all orders for a branch (scoped to branchId).
+   * Used by the enterprise Live Operations dashboard.
+   * Supports optional status filter and cursor-based pagination.
+   */
+  async getOrdersByBranch(
+    branchId: string,
+    filters?: { status?: string; limit?: number; offset?: number },
+  ): Promise<{ orders: Order[]; total: number }> {
+    const qb = this.orderRepository
+      .createQueryBuilder('o')
+      .where('o.branchId = :branchId', { branchId });
+
+    if (filters?.status) {
+      qb.andWhere('o.status = :status', { status: filters.status });
+    }
+
+    const total = await qb.getCount();
+    const orders = await qb
+      .orderBy('o.createdAt', 'DESC')
+      .limit(filters?.limit ?? 50)
+      .offset(filters?.offset ?? 0)
+      .getMany();
+
+    return { orders, total };
+  }
+
+  /**
+   * Bulk-update the status of up to 100 orders at once.
+   * Essential for large logistics firms processing batch deliveries.
+   * Returns the count of updated rows.
+   */
+  async bulkUpdateOrderStatus(
+    updates: { orderId: string; status: string }[],
+  ): Promise<{ updated: number }> {
+    if (!updates?.length) return { updated: 0 };
+    if (updates.length > 100) {
+      throw new Error('Bulk order status update is limited to 100 orders per request');
+    }
+    let count = 0;
+    for (const u of updates) {
+      await this.orderRepository.update(u.orderId, { status: u.status as any });
+      count++;
+    }
+    return { updated: count };
+  }
 }

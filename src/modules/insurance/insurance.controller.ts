@@ -12,7 +12,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { FiLicenseGuard } from '../auth/guards/fi-license.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { UserRole } from '../users/entities/user.entity';
 import { InsuranceService } from './insurance.service';
 import { PurchasePolicyDto, FileClaimDto, ReviewClaimDto } from './dto/insurance.dto';
 
@@ -23,6 +27,7 @@ import { PurchasePolicyDto, FileClaimDto, ReviewClaimDto } from './dto/insurance
 export class InsuranceController {
   constructor(private readonly insuranceService: InsuranceService) {}
 
+  /** Any authenticated user can purchase a policy. */
   @Post('policies')
   @ApiOperation({ summary: 'Purchase an insurance policy from a verified FI' })
   @HttpCode(HttpStatus.CREATED)
@@ -36,6 +41,7 @@ export class InsuranceController {
     return this.insuranceService.getPolicies(user.id);
   }
 
+  /** Any authenticated user can file a claim. */
   @Post('claims')
   @ApiOperation({ summary: 'File an insurance claim against an active policy' })
   @HttpCode(HttpStatus.CREATED)
@@ -53,7 +59,12 @@ export class InsuranceController {
     return this.insuranceService.getClaims(user.id);
   }
 
+  /**
+   * FI admin reviews (approve/reject) a claim — requires verified FI license.
+   */
   @Patch('claims/:id')
+  @UseGuards(RolesGuard, FiLicenseGuard)
+  @Roles(UserRole.FINANCIAL_INSTITUTION, UserRole.FI_TELLER, UserRole.ADMIN)
   @ApiOperation({ summary: 'FI Admin approves or rejects a claim, triggering QP payout on approval' })
   async reviewClaim(
     @CurrentUser() user: any,

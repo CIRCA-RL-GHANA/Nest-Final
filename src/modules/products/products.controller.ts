@@ -10,8 +10,14 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { UserRole } from '../users/entities/user.entity';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -24,20 +30,90 @@ import { UpdateDeliveryZoneDto } from './dto/update-delivery-zone.dto';
 import { ProductStatus } from './entities/product.entity';
 import { SOSStatus } from './entities/sos-alert.entity';
 
+/**
+ * Enterprise/FI roles that may write (create/update/delete) product data.
+ * Rationale: enterprise_operator can manage the product catalog on behalf of the
+ * enterprise_admin; platform ADMIN always has full access.
+ */
+const PRODUCT_WRITE_ROLES = [
+  UserRole.ENTERPRISE_ADMIN,
+  UserRole.ENTERPRISE_OPERATOR,
+  UserRole.ADMIN,
+] as const;
+
+/** Any enterprise or FI role may read product catalog data. */
+const PRODUCT_READ_ROLES = [
+  UserRole.ENTERPRISE_ADMIN,
+  UserRole.ENTERPRISE_OPERATOR,
+  UserRole.ENTERPRISE_VIEWER,
+  UserRole.FINANCIAL_INSTITUTION,
+  UserRole.FI_AUDITOR,
+  UserRole.ADMIN,
+  UserRole.USER,
+] as const;
+
 @ApiTags('Products')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('products')
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
-  // Product Endpoints
+  // ─── Product Endpoints ──────────────────────────────────────────────────
+
+  /** Enterprise admin/operator and ADMIN may create products. */
   @Post()
+  @Roles(...PRODUCT_WRITE_ROLES)
   @ApiOperation({ summary: 'Create a new product' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Product created successfully' })
   createProduct(@Body() createProductDto: CreateProductDto) {
     return this.productsService.createProduct(createProductDto);
   }
 
+  // ─── Enterprise Bulk Operations ──────────────────────────────────────────
+
+  /**
+   * Bulk-create up to 200 products in one request.
+   * Designed for large enterprise catalog onboarding (retailers, warehouses).
+   */
+  @Post('bulk')
+  @Roles(...PRODUCT_WRITE_ROLES)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: '[Enterprise] Bulk-create up to 200 products' })
+  bulkCreate(@Body() dtos: CreateProductDto[]) {
+    return this.productsService.bulkCreateProducts(dtos);
+  }
+
+  /**
+   * Bulk-update stock quantities for up to 500 SKUs.
+   * Useful for periodic warehouse sync (POS integration, inventory sweep).
+   */
+  @Patch('bulk/stock')
+  @Roles(...PRODUCT_WRITE_ROLES)
+  @ApiOperation({ summary: '[Enterprise] Bulk-update stock quantities for up to 500 SKUs' })
+  bulkUpdateStock(@Body() updates: { id: string; stockQuantity: number }[]) {
+    return this.productsService.bulkUpdateStock(updates);
+  }
+
+  /**
+   * Get all products for a branch — the enterprise catalog view.
+   * Supports ?status= and ?category= filters for the enterprise portal.
+   */
+  @Get('branch/:branchId')
+  @Roles(...PRODUCT_READ_ROLES)
+  @ApiOperation({ summary: '[Enterprise] Get all products for a branch with optional filters' })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'category', required: false })
+  getByBranch(
+    @Param('branchId') branchId: string,
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+  ) {
+    return this.productsService.getProductsByBranch(branchId, { status, category });
+  }
+
   @Get()
+  @Roles(...PRODUCT_READ_ROLES)
   @ApiOperation({ summary: 'Get all products with optional filters' })
   @ApiQuery({ name: 'branchId', required: false })
   @ApiQuery({ name: 'category', required: false })
@@ -71,20 +147,23 @@ export class ProductsController {
   }
 
   @Put(':id')
+  @Roles(...PRODUCT_WRITE_ROLES)
   @ApiOperation({ summary: 'Update a product' })
   updateProduct(@Param('id') id: string, @Body() updateProductDto: UpdateProductDto) {
     return this.productsService.updateProduct(id, updateProductDto);
   }
 
   @Patch(':id')
+  @Roles(...PRODUCT_WRITE_ROLES)
   @ApiOperation({ summary: 'Partially update a product' })
   patchProduct(@Param('id') id: string, @Body() updateProductDto: UpdateProductDto) {
     return this.productsService.updateProduct(id, updateProductDto);
   }
 
   @Delete(':id')
+  @Roles(UserRole.ENTERPRISE_ADMIN, UserRole.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete a product' })
+  @ApiOperation({ summary: 'Delete a product (enterprise_admin or admin only)' })
   deleteProduct(@Param('id') id: string) {
     return this.productsService.deleteProduct(id);
   }

@@ -420,4 +420,60 @@ export class ProductsService {
       where: { branchId: product.branchId },
     });
   }
+
+  // ─── Bulk operations for enterprise catalog management ────────────────────
+
+  /**
+   * Bulk-create up to 200 products in a single request.
+   * Returns an array of created products.
+   * Rationale: large enterprise catalogs (retailers, logistics firms) need to
+   * onboard hundreds of SKUs at once without making hundreds of HTTP calls.
+   */
+  async bulkCreateProducts(dtos: CreateProductDto[]): Promise<Product[]> {
+    if (!dtos?.length) return [];
+    if (dtos.length > 200) {
+      throw new Error('Bulk create is limited to 200 products per request');
+    }
+    const entities = this.productRepository.create(dtos);
+    return this.productRepository.save(entities);
+  }
+
+  /**
+   * Bulk-update stock quantities for a list of product IDs.
+   * Useful for large warehouse sync operations.
+   * Returns the count of records updated.
+   */
+  async bulkUpdateStock(
+    updates: { id: string; stockQuantity: number }[],
+  ): Promise<{ updated: number }> {
+    if (!updates?.length) return { updated: 0 };
+    if (updates.length > 500) {
+      throw new Error('Bulk stock update is limited to 500 items per request');
+    }
+    let count = 0;
+    for (const u of updates) {
+      await this.productRepository.update(u.id, { stockQuantity: u.stockQuantity });
+      count++;
+    }
+    return { updated: count };
+  }
+
+  /**
+   * Get all products for a branch (entity-scoped catalog view).
+   * Supports optional status and category filtering for the enterprise portal.
+   */
+  async getProductsByBranch(
+    branchId: string,
+    filters?: { status?: string; category?: string },
+  ): Promise<Product[]> {
+    const qb = this.productRepository.createQueryBuilder('p')
+      .where('p.branchId = :branchId', { branchId });
+    if (filters?.status) {
+      qb.andWhere('p.status = :status', { status: filters.status });
+    }
+    if (filters?.category) {
+      qb.andWhere('p.category = :category', { category: filters.category });
+    }
+    return qb.orderBy('p.createdAt', 'DESC').getMany();
+  }
 }

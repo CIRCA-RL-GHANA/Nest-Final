@@ -10,8 +10,13 @@ import {
   HttpCode,
   HttpStatus,
   Req,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/entities/user.entity';
 import { SubscriptionsService } from './subscriptions.service';
 import { CreateSubscriptionPlanDto } from './dto/create-subscription-plan.dto';
 import { UpdateSubscriptionPlanDto } from './dto/update-subscription-plan.dto';
@@ -23,15 +28,21 @@ import {
 } from './entities/subscription-assignment.entity';
 
 @ApiTags('Subscriptions')
-@Controller('subscriptions')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller('subscriptions')
 export class SubscriptionsController {
   constructor(private readonly subscriptionsService: SubscriptionsService) {}
 
   // ==================== Subscription Plans ====================
 
+  /**
+   * ADMIN-only: create new subscription plan tiers.
+   * Enterprise users subscribe to existing plans via /activate.
+   */
   @Post('plans')
-  @ApiOperation({ summary: 'Create a new subscription plan' })
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Create a new subscription plan (admin only)' })
   @ApiResponse({ status: 201, description: 'Plan created successfully', type: SubscriptionPlan })
   @ApiResponse({ status: 400, description: 'Bad request' })
   @HttpCode(HttpStatus.CREATED)
@@ -59,7 +70,8 @@ export class SubscriptionsController {
   }
 
   @Put('plans/:id')
-  @ApiOperation({ summary: 'Update subscription plan' })
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Update subscription plan (admin only)' })
   @ApiResponse({ status: 200, description: 'Plan updated successfully', type: SubscriptionPlan })
   @ApiResponse({ status: 404, description: 'Plan not found' })
   async updatePlan(
@@ -70,7 +82,8 @@ export class SubscriptionsController {
   }
 
   @Delete('plans/:id')
-  @ApiOperation({ summary: 'Delete subscription plan' })
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Delete subscription plan (admin only)' })
   @ApiResponse({ status: 200, description: 'Plan deleted successfully' })
   @ApiResponse({ status: 404, description: 'Plan not found' })
   @ApiResponse({ status: 400, description: 'Cannot delete plan with active subscriptions' })
@@ -82,7 +95,12 @@ export class SubscriptionsController {
 
   // ==================== Subscription Management ====================
 
+  /**
+   * Enterprise admin, FI owners, and platform admins may activate subscriptions.
+   * Operators and viewers cannot modify billing.
+   */
   @Post('activate')
+  @Roles(UserRole.ENTERPRISE_ADMIN, UserRole.FINANCIAL_INSTITUTION, UserRole.ADMIN)
   @ApiOperation({ summary: 'Activate subscription for Entity or Branch' })
   @ApiResponse({
     status: 201,
@@ -131,6 +149,7 @@ export class SubscriptionsController {
   }
 
   @Delete(':id/cancel')
+  @Roles(UserRole.ENTERPRISE_ADMIN, UserRole.FINANCIAL_INSTITUTION, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cancel subscription' })
   @ApiResponse({ status: 200, description: 'Subscription cancelled successfully' })
   @ApiResponse({ status: 404, description: 'Subscription not found' })
@@ -141,7 +160,9 @@ export class SubscriptionsController {
     return { message: 'Subscription cancelled successfully' };
   }
 
+  /** ADMIN-only: manually trigger the scheduled renewal job. */
   @Post('renew')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Manually trigger subscription renewal process (admin only)' })
   @ApiResponse({ status: 200, description: 'Renewal process completed' })
   @HttpCode(HttpStatus.OK)

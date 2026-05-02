@@ -4,12 +4,26 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/entities/user.entity';
 import { AgenticConciergeService } from './agentic-concierge.service';
 import { CreateSessionDto, SendMessageDto, UpdateSessionContextDto } from './dto/concierge.dto';
 
+/** Enterprise and FI users access AI concierge; viewers may open sessions but not configure them. */
 @ApiTags('agentic-concierge')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(
+  UserRole.ENTERPRISE_ADMIN,
+  UserRole.ENTERPRISE_OPERATOR,
+  UserRole.ENTERPRISE_VIEWER,
+  UserRole.FINANCIAL_INSTITUTION,
+  UserRole.FI_LOAN_OFFICER,
+  UserRole.FI_TELLER,
+  UserRole.FI_AUDITOR,
+  UserRole.ADMIN,
+)
 @Controller('api/v1/concierge')
 export class AgenticConciergeController {
   constructor(private readonly conciergeService: AgenticConciergeService) {}

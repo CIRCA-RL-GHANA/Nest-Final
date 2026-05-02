@@ -29,4 +29,25 @@ export class RevenueController {
   ) {
     return this.revenue.getEntityMonthlyFees(entityId, month);
   }
+
+  /**
+   * Entity self-service: enterprise admins and FI owners can view their own
+   * monthly fee counters without requiring platform-admin scope.
+   * The @Roles override here loosens the class-level ADMIN-only restriction.
+   */
+  @Get('entities/:entityId/my-fees')
+  @Roles(
+    UserRole.ENTERPRISE_ADMIN,
+    UserRole.FINANCIAL_INSTITUTION,
+    UserRole.FI_AUDITOR,
+    UserRole.ADMIN,
+  )
+  @ApiOperation({ summary: 'Entity self-service: get own monthly fee counters' })
+  @ApiQuery({ name: 'month', required: false, description: 'YYYY-MM format; omit for all months' })
+  getMyFees(
+    @Param('entityId') entityId: string,
+    @Query('month') month?: string,
+  ) {
+    return this.revenue.getEntityMonthlyFees(entityId, month);
+  }
 }

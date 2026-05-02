@@ -10,7 +10,11 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsUUID, IsEnum, IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { FiLicenseGuard } from '../auth/guards/fi-license.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { UserRole } from '../users/entities/user.entity';
 import { CreditDataService } from './credit-data.service';
 
 class RequestCreditScoreDto {
@@ -30,9 +34,15 @@ class SubscribeCreditDataDto {
   planTier: 'basic' | 'professional' | 'enterprise';
 }
 
+/**
+ * Credit Data endpoints — only verified Financial Institutions may access
+ * credit score lookups and credit data subscriptions.
+ * FiLicenseGuard validates the FI has a verified regulatory license.
+ */
 @ApiTags('credit-data')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FiLicenseGuard)
+@Roles(UserRole.FINANCIAL_INSTITUTION, UserRole.FI_LOAN_OFFICER, UserRole.FI_AUDITOR, UserRole.ADMIN)
 @Controller('api/v1/credit-data')
 export class CreditDataController {
   constructor(private readonly creditDataService: CreditDataService) {}
@@ -45,6 +55,7 @@ export class CreditDataController {
   }
 
   @Post('subscribe')
+  @Roles(UserRole.FINANCIAL_INSTITUTION, UserRole.ADMIN)
   @ApiOperation({ summary: 'FI subscribes to a credit data plan tier' })
   @HttpCode(HttpStatus.OK)
   async subscribe(@CurrentUser() user: any, @Body() dto: SubscribeCreditDataDto) {
