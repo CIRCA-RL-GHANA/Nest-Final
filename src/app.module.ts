@@ -54,6 +54,11 @@ import { LoansModule } from './modules/loans/loans.module';
 import { DepositsModule } from './modules/deposits/deposits.module';
 import { InsuranceModule } from './modules/insurance/insurance.module';
 import { CreditDataModule } from './modules/credit-data/credit-data.module';
+// ── Enterprise Extension ──────────────────────────────────────────────────────
+import { EnterpriseModule } from './modules/enterprise/enterprise.module';
+import { MultiChannelModule } from './modules/multi-channel/multi-channel.module';
+import { FulfillmentModule } from './modules/fulfillment/fulfillment.module';
+import { AgenticConciergeModule } from './modules/agentic-concierge/agentic-concierge.module';
 
 @Module({
   imports: [
@@ -165,6 +170,11 @@ import { CreditDataModule } from './modules/credit-data/credit-data.module';
     DepositsModule,
     InsuranceModule,
     CreditDataModule,
+    // ── Enterprise Extension ────────────────────────────────────────────────
+    EnterpriseModule,
+    MultiChannelModule,
+    FulfillmentModule,
+    AgenticConciergeModule,
   ],
   providers: [
     {

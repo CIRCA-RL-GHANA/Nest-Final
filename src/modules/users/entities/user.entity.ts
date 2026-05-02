@@ -15,6 +15,13 @@ export enum UserRole {
   FI_TELLER = 'fi_teller',
   /** FI staff: read-only auditor. */
   FI_AUDITOR = 'fi_auditor',
+  // ── Enterprise roles ──────────────────────────────────────────────────────
+  /** Enterprise entity owner: full access to enterprise onboarding, API keys, channels, fulfillment, and concierge. */
+  ENTERPRISE_ADMIN = 'enterprise_admin',
+  /** Enterprise operator: can manage channels, fulfillment tasks, and concierge sessions; cannot modify billing or API keys. */
+  ENTERPRISE_OPERATOR = 'enterprise_operator',
+  /** Enterprise viewer: read-only access to enterprise dashboards and analytics. */
+  ENTERPRISE_VIEWER = 'enterprise_viewer',
 }
 
 @Entity('users')
