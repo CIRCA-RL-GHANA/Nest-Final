@@ -4,8 +4,9 @@ import * as bcrypt from 'bcrypt';
 import { BaseEntity } from '@/common/entities/base.entity';
 import { User } from './user.entity';
 
+// Owner is the individual entity creator — not an assignable staff role.
+// It is granted automatically and can only exist under EntityType.INDIVIDUAL.
 export enum StaffRole {
-  OWNER = 'Owner',
   ADMINISTRATOR = 'Administrator',
   SOCIAL_OFFICER = 'Social Officer',
   RESPONSE_OFFICER = 'Response Officer',
