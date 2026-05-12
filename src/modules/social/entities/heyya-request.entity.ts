@@ -9,6 +9,16 @@ export enum HeyYaStatus {
   EXPIRED = 'expired',
 }
 
+/** The type of date the sender has in mind — primary dating intent. */
+export enum HeyYaIntent {
+  COFFEE = 'coffee',
+  DINNER = 'dinner',
+  WALK = 'walk',
+  MOVIE = 'movie',
+  VIDEO_CALL = 'video_call',
+  ANY = 'any',
+}
+
 @Entity('heyya_requests')
 @Index(['senderId'])
 @Index(['recipientId'])
@@ -29,7 +39,7 @@ export class HeyYaRequest extends BaseEntity {
   recipientId: string;
 
   @ApiProperty({
-    description: 'Request message',
+    description: 'Opening message from the sender',
     required: false,
   })
   @Column({ type: 'text', nullable: true })
@@ -42,6 +52,36 @@ export class HeyYaRequest extends BaseEntity {
   })
   @Column({ type: 'enum', enum: HeyYaStatus, default: HeyYaStatus.PENDING })
   status: HeyYaStatus;
+
+  @ApiProperty({
+    description: 'Primary date intent expressed by the sender',
+    enum: HeyYaIntent,
+    example: HeyYaIntent.COFFEE,
+    default: HeyYaIntent.ANY,
+  })
+  @Column({ type: 'enum', enum: HeyYaIntent, default: HeyYaIntent.ANY })
+  intent: HeyYaIntent;
+
+  @ApiProperty({
+    description: 'Genie AI compatibility score (0–100)',
+    required: false,
+  })
+  @Column({ type: 'int', nullable: true })
+  compatibilityScore: number | null;
+
+  @ApiProperty({
+    description: 'Breakdown of compatibility scores per dimension',
+    required: false,
+    type: 'object',
+    example: { interests: 92, vibe: 88, lifestyle: 85, values: 90 },
+  })
+  @Column({ type: 'jsonb', nullable: true })
+  compatibilityBreakdown: {
+    interests: number;
+    vibe: number;
+    lifestyle: number;
+    values: number;
+  } | null;
 
   @ApiProperty({
     description: 'When request expires',
