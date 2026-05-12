@@ -10,6 +10,8 @@ export enum BranchType {
   PICKUP_POINT = 'Pickup Point',
   DELIVERY_HUB = 'Delivery Hub',
   SERVICE_CENTER = 'Service Center',
+  // Content creation is a commercial activity — operated under a Digital branch.
+  DIGITAL = 'Digital',
 }
 
 @Entity('branches')
