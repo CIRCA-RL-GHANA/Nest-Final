@@ -338,7 +338,7 @@ export class UsersService {
     const client = new Twilio(accountSid, authToken);
 
     await client.messages.create({
-      body: `Your PROMPT Genie verification code is: ${otp}. Valid for 10 minutes. Never share this code with anyone.`,
+      body: `Your genie help verification code is: ${otp}. Valid for 10 minutes. Never share this code with anyone.`,
       from: fromNumber,
       to: phoneNumber,
     });

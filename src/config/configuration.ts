@@ -1,9 +1,16 @@
 export const configuration = () => ({
   // Application
+  appName: process.env.APP_NAME || 'genie help',
   nodeEnv: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '3000', 10),
   apiPrefix: process.env.API_PREFIX || 'api',
   apiVersion: process.env.API_VERSION || 'v1',
+
+  // Domains (used by nginx templates, CORS, and outbound links)
+  domain: {
+    api: process.env.API_DOMAIN || 'api.genieinprompt.app',
+    frontend: process.env.FRONTEND_DOMAIN || 'app.genieinprompt.app',
+  },
 
   // Database
   database: {
@@ -44,7 +51,7 @@ export const configuration = () => ({
   email: {
     sendgridApiKey: process.env.SENDGRID_API_KEY,
     from: process.env.EMAIL_FROM || 'noreply@genieinprompt.app',
-    fromName: process.env.EMAIL_FROM_NAME || 'PROMPT Genie',
+    fromName: process.env.EMAIL_FROM_NAME || 'genie help',
   },
 
   // SMS

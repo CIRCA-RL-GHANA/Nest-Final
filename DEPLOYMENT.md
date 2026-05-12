@@ -1,4 +1,4 @@
-# Deploying PROMPT Genie Backend to Hostinger VPS
+# Deploying genie help Backend to Hostinger VPS
 
 This guide walks through a one-time VPS initialisation and the automated CI/CD
 pipeline that deploys every push to `main`.

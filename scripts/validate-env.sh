@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# PROMPT Genie — Environment Validation Script
+# genie help — Environment Validation Script
 #
 # Validates that every variable consumed by configuration.ts
 # and docker-compose.prod.yml is present, non-empty, and not
@@ -52,8 +52,8 @@ _check_required() {
   local v; v=$(_val "$var")
   if [[ -z "$v" ]]; then
     _err "$var is not set"
-  elif [[ "$v" == *CHANGE_ME* || "$v" == *change_me* || "$v" == *your-* \
-       || "$v" == *replace* || "$v" == *TODO* ]]; then
+  elif [[ "$v" == *CHANGE_ME* || "$v" == *change_me* || "$v" == *change-me* \
+       || "$v" == *your-* || "$v" == *replace* || "$v" == *TODO* ]]; then
     _err "$var is still a placeholder: ${v:0:40}..."
   else
     _ok "$var ✓"
@@ -165,6 +165,15 @@ if [[ ${#redis_pw} -lt 16 ]]; then
   _warn "REDIS_PASSWORD is short (${#redis_pw} chars — recommend ≥ 16)"
 else
   _ok "REDIS_PASSWORD length OK"
+fi
+
+ml_secret=$(_val ML_MODEL_SIGNING_SECRET)
+if [[ -z "$ml_secret" || "$ml_secret" == *change-me* || "$ml_secret" == *CHANGE_ME* ]]; then
+  _err "ML_MODEL_SIGNING_SECRET is not set or is still a placeholder. Generate: openssl rand -base64 48"
+elif [[ ${#ml_secret} -lt 32 ]]; then
+  _err "ML_MODEL_SIGNING_SECRET is too short (${#ml_secret} chars — need ≥ 32)"
+else
+  _ok "ML_MODEL_SIGNING_SECRET length OK (${#ml_secret} chars)"
 fi
 
 # Production-specific safety checks

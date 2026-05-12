@@ -6,6 +6,11 @@ export const validationSchema = Joi.object({
   PORT: Joi.number().default(3000),
   API_PREFIX: Joi.string().default('api'),
   API_VERSION: Joi.string().default('v1'),
+  APP_NAME: Joi.string().default('genie help'),
+
+  // Domains (required in production; defaults serve development)
+  API_DOMAIN: Joi.string().hostname().default('api.genieinprompt.app'),
+  FRONTEND_DOMAIN: Joi.string().hostname().default('app.genieinprompt.app'),
 
   // Database
   DB_HOST: Joi.string().required(),
@@ -39,7 +44,7 @@ export const validationSchema = Joi.object({
   // Email sending will be skipped/warned when the key is absent.
   SENDGRID_API_KEY: Joi.string().allow('').default(''),
   EMAIL_FROM: Joi.string().email().default('noreply@genieinprompt.app'),
-  EMAIL_FROM_NAME: Joi.string().default('PROMPT Genie'),
+  EMAIL_FROM_NAME: Joi.string().default('genie help'),
 
   // SMS
   // Allow empty so the app can start without Twilio configured.
@@ -79,7 +84,7 @@ export const validationSchema = Joi.object({
   AI_SURGE_MAX_MULTIPLIER: Joi.number().default(3.5),
   AI_PLATFORM_FEE_PCT: Joi.number().default(8),
   ML_MODEL_PATH: Joi.string().default('./ml-models'),
-  ML_MODEL_SIGNING_SECRET: Joi.string().min(32).default('change-me-to-a-32-char-secret-key!!'),
+  ML_MODEL_SIGNING_SECRET: Joi.string().min(32).required(),
   FEATURE_STORE_UPDATE_INTERVAL: Joi.number().default(300000),
 
   // Google Maps

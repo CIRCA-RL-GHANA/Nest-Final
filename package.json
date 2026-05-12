@@ -2,7 +2,7 @@
   "name": "promptgenie-backend",
   "version": "1.0.0",
   "description": "Production-ready NestJS backend for multi-tenant enterprise platform",
-  "author": "PROMPT Genie Team",
+  "author": "genie help Team",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# PROMPT Genie — SSL Certificate Helper
+# genie help — SSL Certificate Helper
 #
 # Issues (or re-issues) an SSL certificate for the API domain
 # using certbot standalone mode.  Run this only if:

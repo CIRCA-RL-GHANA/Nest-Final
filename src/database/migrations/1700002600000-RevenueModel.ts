@@ -3,7 +3,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 /**
  * RevenueModel1700002600000
  *
- * Implements the PROMPT Genie revenue model:
+ * Implements the genie help revenue model:
  *  1. Extends subscription_plans with per-staff pricing and feature flags.
  *  2. Extends subscription_assignments with free-trial tracking and staff count.
  *  3. Creates revenue_records – immutable ledger of all Q Point fees collected.

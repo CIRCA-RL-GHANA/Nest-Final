@@ -1,6 +1,6 @@
 # Backend — orionstack-backend--main
 
-NestJS 10 REST API and WebSocket server for the PROMPT Genie platform.
+NestJS 10 REST API and WebSocket server for the genie help platform.
 
 ## Overview
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# PROMPT Genie — Production Deployment Script
+# genie help — Production Deployment Script
 #
 # MASTER STANDARD (applied to every script in this repo):
 #   1. set -euo pipefail — fail fast, no silent errors

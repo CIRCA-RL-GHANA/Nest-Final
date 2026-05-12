@@ -18,7 +18,7 @@ import { AcceptQPointsTosDto } from '../dto/accept-tos.dto';
 
 export const CURRENT_TOS_VERSION = '1.1.0';
 export const CURRENT_TOS_EFFECTIVE_DATE = 'April 27, 2026';
-export const COMPANY_NAME = 'PROMPT Genie Ltd.';
+export const COMPANY_NAME = 'genie help Ltd.';
 export const COMPANY_JURISDICTION = 'Republic of Ghana';
 export const LEGAL_EMAIL = 'legal@genieinprompt.app';
 

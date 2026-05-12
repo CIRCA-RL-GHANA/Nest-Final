@@ -39,7 +39,7 @@ export class EmailService {
     }
 
     this.fromEmail = this.configService.get<string>('email.from', 'noreply@genieinprompt.app');
-    this.fromName = this.configService.get<string>('email.fromName', 'PROMPT Genie');
+    this.fromName = this.configService.get<string>('email.fromName', 'genie help');
   }
 
   /**
@@ -156,10 +156,10 @@ export class EmailService {
    * Send welcome email
    */
   async sendWelcome(email: string, name: string): Promise<void> {
-    const subject = 'Welcome to PROMPT Genie!';
+    const subject = 'Welcome to genie help!';
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Welcome to PROMPT Genie, ${name}!</h2>
+        <h2>Welcome to genie help, ${name}!</h2>
         <p>Thank you for joining our platform. We're excited to have you on board!</p>
         <p>Get started by exploring our features and setting up your profile.</p>
         <div style="text-align: center; margin: 30px 0;">
@@ -168,7 +168,7 @@ export class EmailService {
           </a>
         </div>
         <p>If you have any questions, feel free to reach out to our support team.</p>
-        <p>Best regards,<br>The PROMPT Genie Team</p>
+        <p>Best regards,<br>The genie help Team</p>
       </div>
     `;
 
@@ -214,7 +214,7 @@ export class EmailService {
           <p><strong>Status:</strong> ${orderDetails.status}</p>
         </div>
         <p>We'll send you another email when your order ships.</p>
-        <p>Thank you for choosing PROMPT Genie!</p>
+        <p>Thank you for choosing genie help!</p>
       </div>
     `;
 
@@ -230,7 +230,7 @@ export class EmailService {
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2>${title}</h2>
         <p>${message}</p>
-        <p>Best regards,<br>The PROMPT Genie Team</p>
+        <p>Best regards,<br>The genie help Team</p>
       </div>
     `;
 

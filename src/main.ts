@@ -75,8 +75,8 @@ async function bootstrap() {
   // Swagger documentation (disabled in production)
   if (!isProduction) {
     const config = new DocumentBuilder()
-      .setTitle('PROMPT Genie Platform API')
-      .setDescription('PROMPT Genie — All-in-One Financial & Social Hub API')
+      .setTitle('genie help Platform API')
+      .setDescription('genie help — All-in-One Financial & Social Hub API')
       .setVersion('1.0')
       .addBearerAuth()
       .addTag('auth', 'Authentication and authorization')

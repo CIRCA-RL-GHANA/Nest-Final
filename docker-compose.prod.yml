@@ -1,5 +1,5 @@
 # ============================================
-# Production Docker Compose — PROMPT Genie Backend
+# Production Docker Compose — genie help Backend
 # Project name is pinned so container/volume/network names
 # are stable regardless of the directory this file lives in.
 # ============================================

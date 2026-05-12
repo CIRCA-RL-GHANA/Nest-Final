@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# PROMPT Genie — Environment Bootstrap Script
+# genie help — Environment Bootstrap Script
 #
 # Creates .env from .env.example and injects freshly generated
 # cryptographic secrets so no value is ever a placeholder.
