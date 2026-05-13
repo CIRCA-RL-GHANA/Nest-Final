@@ -6,7 +6,6 @@ import {
   SettlementType,
 } from '../entities/q-point-settlement.entity';
 import { QPointTrade } from '../entities/q-point-trade.entity';
-import { PaymentFacilitatorService } from './payment-facilitator.service';
 import { MarketNotificationService } from './market-notification.service';
 
 function makeTrade(overrides: Partial<QPointTrade> = {}): QPointTrade {
@@ -16,7 +15,7 @@ function makeTrade(overrides: Partial<QPointTrade> = {}): QPointTrade {
     sellOrderId: 'order-sell',
     buyerId: 'buyer-1',
     sellerId: 'seller-1',
-    price: 1.05,
+    price: 1.0,
     quantity: 100,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -31,27 +30,26 @@ describe('SettlementService', () => {
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
+    find: jest.Mock;
     findOne: jest.Mock;
   };
-  let mockFacilitator: { transfer: jest.Mock };
   let mockNotifications: { notifyUser: jest.Mock };
 
-  beforeEach(async () => {
+  beforeEach(() => {
     mockRepo = {
       create: jest.fn((dto) => ({ ...dto, id: `settlement-${Math.random()}` })),
       save: jest.fn(async (items: unknown) =>
         Array.isArray(items) ? items.map((item, i) => ({ ...item, id: `settlement-${i}` })) : items,
       ),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
     };
 
-    mockFacilitator = { transfer: jest.fn() };
     mockNotifications = { notifyUser: jest.fn().mockResolvedValue(undefined) };
 
     service = new SettlementService(
       mockRepo as never,
-      mockFacilitator as unknown as PaymentFacilitatorService,
       mockNotifications as unknown as MarketNotificationService,
     );
   });
@@ -59,106 +57,95 @@ describe('SettlementService', () => {
   afterEach(() => jest.clearAllMocks());
 
   // ─── createSettlement ────────────────────────────────────────────────────
+  // Per Q Points ToS §4.3, the Platform never initiates fiat transfers; it
+  // only records PENDING audit entries and notifies both parties.
 
   describe('createSettlement', () => {
-    it('creates two pending settlement records then marks both as completed on success', async () => {
-      mockFacilitator.transfer.mockResolvedValue({
-        transferId: 'ref-12345',
-        status: 'completed',
-      });
-
+    it('creates a PENDING debit + credit record for the trade', async () => {
       const trade = makeTrade();
-      await service.createSettlement(trade, 'buyer-1', 'seller-1', 105.0);
+      await service.createSettlement(trade, 'buyer-1', 'seller-1', 100.0);
 
-      // Two records created + saved
       expect(mockRepo.create).toHaveBeenCalledTimes(2);
       expect(mockRepo.save).toHaveBeenCalledWith(
         expect.arrayContaining([
-          expect.objectContaining({ type: SettlementType.DEBIT, status: SettlementStatus.PENDING }),
+          expect.objectContaining({
+            type: SettlementType.DEBIT,
+            status: SettlementStatus.PENDING,
+            userId: 'buyer-1',
+            amount: 100.0,
+            tradeId: trade.id,
+          }),
           expect.objectContaining({
             type: SettlementType.CREDIT,
             status: SettlementStatus.PENDING,
+            userId: 'seller-1',
+            amount: 100.0,
+            tradeId: trade.id,
           }),
         ]),
       );
+    });
 
-      // Both updated to COMPLETED with facilitator reference
+    it('notifies both buyer and seller with settlement_pending', async () => {
+      const trade = makeTrade();
+      await service.createSettlement(trade, 'buyer-abc', 'seller-xyz', 50.0);
+
+      expect(mockNotifications.notifyUser).toHaveBeenCalledWith(
+        'buyer-abc',
+        'settlement_pending',
+        expect.any(String),
+        expect.objectContaining({ tradeId: trade.id, amount: 50.0 }),
+      );
+      expect(mockNotifications.notifyUser).toHaveBeenCalledWith(
+        'seller-xyz',
+        'settlement_pending',
+        expect.any(String),
+        expect.objectContaining({ tradeId: trade.id, amount: 50.0 }),
+      );
+    });
+
+    it('does NOT update existing settlement records (Platform records only, never moves fiat)', async () => {
+      const trade = makeTrade();
+      await service.createSettlement(trade, 'buyer-1', 'seller-1', 100.0);
+      expect(mockRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── confirmSettlementByWebhook ──────────────────────────────────────────
+
+  describe('confirmSettlementByWebhook', () => {
+    it('marks all settlement records for a trade as COMPLETED with facilitator reference', async () => {
+      const records: QPointSettlement[] = [
+        { id: 'settlement-a' } as QPointSettlement,
+        { id: 'settlement-b' } as QPointSettlement,
+      ];
+      mockRepo.find.mockResolvedValue(records);
+
+      await service.confirmSettlementByWebhook('trade-xyz', 'ref-123');
+
+      expect(mockRepo.update).toHaveBeenCalledTimes(2);
       expect(mockRepo.update).toHaveBeenCalledWith(
-        expect.objectContaining({ id: expect.any(String) }),
+        { id: 'settlement-a' },
         expect.objectContaining({
           status: SettlementStatus.COMPLETED,
-          facilitatorReference: 'ref-12345',
+          facilitatorReference: 'ref-123',
+        }),
+      );
+      expect(mockRepo.update).toHaveBeenCalledWith(
+        { id: 'settlement-b' },
+        expect.objectContaining({
+          status: SettlementStatus.COMPLETED,
+          facilitatorReference: 'ref-123',
         }),
       );
     });
 
-    it('uses the correct debit/credit types for buyer and seller', async () => {
-      mockFacilitator.transfer.mockResolvedValue({
-        transferId: 'ref-99',
-        status: 'completed',
-      });
-
-      const trade = makeTrade();
-      await service.createSettlement(trade, 'buyer-1', 'seller-1', 50.0);
-
-      const createCalls = mockRepo.create.mock.calls;
-      const types = createCalls.map((call) => call[0].type as SettlementType);
-      expect(types).toContain(SettlementType.DEBIT);
-      expect(types).toContain(SettlementType.CREDIT);
-    });
-
-    it('marks both records as FAILED when the facilitator returns failed status', async () => {
-      mockFacilitator.transfer.mockResolvedValue({
-        transferId: undefined,
-        status: 'failed',
-        errorMessage: 'Insufficient funds',
-      });
-
-      const trade = makeTrade();
-      await expect(service.createSettlement(trade, 'buyer-1', 'seller-1', 105.0)).rejects.toThrow();
-
-      // Both records marked failed
-      expect(mockRepo.update).toHaveBeenCalledWith(
-        expect.objectContaining({ id: expect.any(String) }),
-        { status: SettlementStatus.FAILED },
-      );
-    });
-
-    it('notifies both parties when settlement fails', async () => {
-      mockFacilitator.transfer.mockRejectedValue(new Error('Network timeout'));
-
-      const trade = makeTrade();
-      await expect(service.createSettlement(trade, 'buyer-1', 'seller-1', 105.0)).rejects.toThrow();
-
-      expect(mockNotifications.notifyUser).toHaveBeenCalledWith(
-        'buyer-1',
-        'settlement_failed',
-        expect.stringContaining(trade.id),
-        expect.objectContaining({ tradeId: trade.id }),
-      );
-      expect(mockNotifications.notifyUser).toHaveBeenCalledWith(
-        'seller-1',
-        'settlement_failed',
-        expect.stringContaining(trade.id),
-        expect.objectContaining({ tradeId: trade.id }),
-      );
-    });
-
-    it('calls the facilitator with the correct buyer, seller, amount and reference', async () => {
-      mockFacilitator.transfer.mockResolvedValue({
-        transferId: 'ref-ok',
-        status: 'completed',
-      });
-
-      const trade = makeTrade({ id: 'trade-reference-check' });
-      await service.createSettlement(trade, 'buyer-abc', 'seller-xyz', 200.0);
-
-      expect(mockFacilitator.transfer).toHaveBeenCalledWith(
-        'buyer-abc',
-        'seller-xyz',
-        200.0,
-        'trade-reference-check',
-      );
+    it('returns silently when no records exist for the trade', async () => {
+      mockRepo.find.mockResolvedValue([]);
+      await expect(
+        service.confirmSettlementByWebhook('missing-trade', 'ref-1'),
+      ).resolves.toBeUndefined();
+      expect(mockRepo.update).not.toHaveBeenCalled();
     });
   });
 
@@ -177,7 +164,7 @@ describe('SettlementService', () => {
       expect(result).toBe(s);
     });
 
-    it('throws InternalServerErrorException when the settlement is not found', async () => {
+    it('throws when the settlement is not found', async () => {
       mockRepo.findOne.mockResolvedValue(null);
 
       await expect(service.getSettlementStatus('nonexistent')).rejects.toThrow();

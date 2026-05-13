@@ -4,6 +4,7 @@ import { PaymentsService } from './payments.service';
 import { Payment } from '../entities/payment.entity';
 import { WalletsService } from '../wallets/wallets.service';
 import { AIFraudService } from '../ai/services/ai-fraud.service';
+import { QPointsTransactionService } from '../qpoints/qpoints-transaction.service';
 
 describe('PaymentsService', () => {
   let service: PaymentsService;
@@ -23,6 +24,14 @@ describe('PaymentsService', () => {
             scoreTransaction: jest
               .fn()
               .mockReturnValue({ blocked: false, riskScore: 0, reviewFlag: false }),
+          },
+        },
+        {
+          provide: QPointsTransactionService,
+          useValue: {
+            getAccountByUserId: jest.fn().mockResolvedValue({ id: 'acc-user' }),
+            getAccountByEntityId: jest.fn().mockResolvedValue({ id: 'acc-merchant' }),
+            transfer: jest.fn().mockResolvedValue({ id: 'tx-1' }),
           },
         },
       ],

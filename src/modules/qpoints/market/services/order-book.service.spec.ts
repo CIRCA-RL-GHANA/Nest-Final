@@ -5,6 +5,8 @@ import { QPointTrade } from '../entities/q-point-trade.entity';
 import { MarketBalanceService } from './market-balance.service';
 import { SettlementService } from './settlement.service';
 import { MarketNotificationService } from './market-notification.service';
+import { RevenueService } from '@modules/revenue/revenue.service';
+import { CrossFacilitatorEngineService } from './cross-facilitator-engine.service';
 
 // ── Fixture Factories ───────────────────────────────────────────────────────
 
@@ -117,6 +119,15 @@ describe('OrderBookService', () => {
     mockSettlement = { createSettlement: jest.fn().mockResolvedValue(undefined) };
     mockNotifications = { notifyUser: jest.fn().mockResolvedValue(undefined) };
 
+    const mockRevenue = {
+      recordTransactionFee: jest.fn().mockResolvedValue(undefined),
+      recordFee: jest.fn().mockResolvedValue(undefined),
+    } as unknown as RevenueService;
+    const mockCrossFacilitatorEngine = {
+      getAllAiBalances: jest.fn().mockResolvedValue([]),
+      executeBridge: jest.fn().mockResolvedValue(undefined),
+    } as unknown as CrossFacilitatorEngineService;
+
     service = new OrderBookService(
       mockOrderRepo as never,
       mockTradeRepo as never,
@@ -124,6 +135,8 @@ describe('OrderBookService', () => {
       mockBalance as unknown as MarketBalanceService,
       mockSettlement as unknown as SettlementService,
       mockNotifications as unknown as MarketNotificationService,
+      mockRevenue,
+      mockCrossFacilitatorEngine,
     );
   });
 

@@ -3,6 +3,7 @@ import { AiParticipantService } from './ai-participant.service';
 import { QPointOrder, QPointOrderStatus, QPointOrderType } from '../entities/q-point-order.entity';
 import { OrderBookService, OrderBook } from './order-book.service';
 import { MarketBalanceService } from './market-balance.service';
+import { CrossFacilitatorEngineService } from './cross-facilitator-engine.service';
 
 const AI_USER = '00000000-0000-0000-0000-000000000001';
 
@@ -67,11 +68,15 @@ describe('AiParticipantService (§5.2 — Ordinary User)', () => {
 
     // Direct constructor instantiation bypasses @InjectRepository / DI decorators.
     // Cast through `unknown` so TypeScript accepts the partial mock types.
+    const mockCrossFacilitatorEngine = {
+      getAllAiBalances: jest.fn().mockResolvedValue([]),
+    } as unknown as CrossFacilitatorEngineService;
     return new AiParticipantService(
       mockOrderRepo as unknown as ReturnType<typeof jest.fn> as never,
       mockOrderBook as unknown as OrderBookService,
       mockBalance as unknown as MarketBalanceService,
       mockConfig as never,
+      mockCrossFacilitatorEngine,
     );
   }
 
