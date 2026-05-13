@@ -1,5 +1,5 @@
 import { IsUUID, IsUrl, IsArray, ArrayNotEmpty, IsString } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 
 /** Supported enterprise webhook event types */
 export const SUPPORTED_EVENTS = [

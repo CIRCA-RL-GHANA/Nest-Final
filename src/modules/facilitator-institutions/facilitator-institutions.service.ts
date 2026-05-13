@@ -14,7 +14,7 @@ import { QPointTransaction, TransactionType, TransactionStatus } from '../qpoint
 import { OnboardInstitutionDto, IssueQpDto, InitiateSettlementDto } from './dto/institution.dto';
 
 // ─── Global QP hard cap: 500 trillion ────────────────────────────────────────
-const GLOBAL_QP_CAP = 500_000_000_000_000;
+const _GLOBAL_QP_CAP = 500_000_000_000_000;
 
 @Injectable()
 export class FacilitatorInstitutionsService {

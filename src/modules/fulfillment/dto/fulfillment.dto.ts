@@ -1,5 +1,5 @@
 import {
-  IsUUID, IsEnum, IsOptional, IsString, IsArray, IsBoolean, IsInt, Min, Max,
+  IsUUID, IsEnum, IsOptional, IsString, IsArray, IsInt, Min, Max,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { FulfillmentProvider, FulfillmentStatus } from '../entities/fulfillment.entity';

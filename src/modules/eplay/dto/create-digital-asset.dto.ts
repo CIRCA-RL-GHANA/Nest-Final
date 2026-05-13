@@ -1,4 +1,4 @@
-import { IsString, IsEnum, IsNumber, IsOptional, IsArray, Min, Max, MaxLength } from 'class-validator';
+import { IsString, IsEnum, IsNumber, IsOptional, IsArray, Min, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { DigitalAssetType, AccessModel } from '../entities/digital-asset.entity';
 

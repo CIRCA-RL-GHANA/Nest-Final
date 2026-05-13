@@ -65,7 +65,7 @@ export class DepositsService {
 
   // ─── Mature Deposit ────────────────────────────────────────────────────────
 
-  async matureDeposit(depositId: string, triggeredByUserId?: string): Promise<DepositAccount> {
+  async matureDeposit(depositId: string, _triggeredByUserId?: string): Promise<DepositAccount> {
     const deposit = await this.findOrFail(depositId);
 
     if (deposit.status !== DepositStatus.ACTIVE) {

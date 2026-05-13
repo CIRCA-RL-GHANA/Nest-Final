@@ -684,7 +684,7 @@ export class QPointsMarketController {
   @ApiResponse({ status: 400, description: 'Missing required fields' })
   async facilitatorSettlementWebhook(
     @Body() body: { reference: string; facilitatorRef: string; status?: string },
-    @Req() req: Request,
+    @Req() _req: Request,
   ) {
     if (!body.reference || !body.facilitatorRef) {
       throw new BadRequestException('reference and facilitatorRef are required');

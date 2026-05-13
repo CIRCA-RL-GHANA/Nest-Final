@@ -81,7 +81,7 @@ export class LoansService {
   async getLoanOffers(
     userId: string,
     amountQp: number,
-    purpose: string,
+    _purpose: string,
   ): Promise<Array<{ fiEntityId: string; interestRate: number; termDays: number; maxAmount: number }>> {
     const profiles = await this.fiProfileRepo.find({
       where: { licenseVerified: true },

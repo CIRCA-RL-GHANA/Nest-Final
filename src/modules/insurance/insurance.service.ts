@@ -40,7 +40,7 @@ export class InsuranceService {
   // ─── Purchase Policy ───────────────────────────────────────────────────────
 
   async purchasePolicy(userId: string, dto: PurchasePolicyDto): Promise<InsurancePolicy> {
-    const fiProfile = await this.getVerifiedFiProfile(dto.fiEntityId);
+    const _fiProfile = await this.getVerifiedFiProfile(dto.fiEntityId);
 
     const platformFee = parseFloat((dto.premiumQp * PLATFORM_COMMISSION_RATE).toFixed(4));
     const netPremium = parseFloat((dto.premiumQp - platformFee).toFixed(4));

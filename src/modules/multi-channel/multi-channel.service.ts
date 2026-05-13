@@ -95,7 +95,7 @@ export class MultiChannelService {
   async receiveWebhookEvent(
     channelId: string,
     eventType: string,
-    payload: Record<string, any>,
+    _payload: Record<string, any>,
   ): Promise<{ received: true; channelId: string; eventType: string }> {
     const channel = await this.getChannel(channelId);
     this.logger.log(`Webhook [${eventType}] received from channel ${channelId} (${channel.channelType})`);
