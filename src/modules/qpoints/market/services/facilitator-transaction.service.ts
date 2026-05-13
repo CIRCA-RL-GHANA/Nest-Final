@@ -621,7 +621,7 @@ export class FacilitatorTransactionService {
     payload: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await this.webhookRepo.insert({ eventId, provider, eventType, payload });
+      await this.webhookRepo.insert({ eventId, provider, eventType, payload: payload as any });
     } catch {
       // Unique constraint hit — concurrent delivery, already processed
     }

@@ -13,6 +13,7 @@ export enum StaffRole {
   MONITOR = 'Monitor',
   BRANCH_MANAGER = 'Branch Manager',
   DRIVER = 'Driver',
+  OWNER = 'Owner',
 }
 
 @Entity('staff')
