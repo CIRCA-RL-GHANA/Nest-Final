@@ -195,8 +195,15 @@ describe('AiParticipantService (§5.2 — Ordinary User)', () => {
 
   describe('run() – max open orders cap', () => {
     it('skips placing new orders when AI already has maxOpenOrders open', async () => {
-      // Fill up 10 open orders
-      const openOrders = Array.from({ length: 10 }, () => makeOrder());
+      // Fill 10 open orders, including at least one BUY and one SELL so that
+      // _ensureStandingOrders does NOT place fresh standing orders. With
+      // balance at target inventory, _runInternal also has no work to do
+      // beyond the cap check.
+      const openOrders = [
+        makeOrder({ type: QPointOrderType.BUY }),
+        makeOrder({ type: QPointOrderType.SELL }),
+        ...Array.from({ length: 8 }, () => makeOrder({ type: QPointOrderType.BUY })),
+      ];
       mockOrderRepo.find.mockResolvedValue(openOrders);
       mockOrderBook.getOrderBook.mockResolvedValue(bookWithSpread(0.95, 1.05));
       mockBalance.getBalance.mockResolvedValue({
@@ -206,7 +213,7 @@ describe('AiParticipantService (§5.2 — Ordinary User)', () => {
 
       await service.run();
 
-      // No new orders placed because cap reached
+      // No new orders placed because cap reached AND standing orders already present
       expect(mockOrderBook.createOrder).not.toHaveBeenCalled();
     });
   });
@@ -239,7 +246,9 @@ describe('AiParticipantService (§5.2 — Ordinary User)', () => {
 
       await service.run();
 
-      expect(mockOrderBook.getOrderBook).toHaveBeenCalled();
+      // When enabled with no existing standing orders, the AI places its
+      // last-resort BUY + SELL standing orders (TOS §5.2 operational).
+      expect(mockOrderBook.createOrder).toHaveBeenCalled();
     });
   });
 
