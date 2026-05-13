@@ -129,7 +129,7 @@ jobs:
             --exclude='dist' \
             --exclude='*.log' \
             --exclude='coverage' \
-            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT || 22 }} -o StrictHostKeyChecking=no" \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT || 22 }} -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o IdentityAgent=none" \
             ./ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/promptgenie/
 
       # ── Build & restart on VPS ─────────────────────────────────────────────
