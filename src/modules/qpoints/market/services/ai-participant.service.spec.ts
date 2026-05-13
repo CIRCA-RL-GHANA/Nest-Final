@@ -255,25 +255,18 @@ describe('AiParticipantService (§5.2 — Ordinary User)', () => {
   // ─── Circuit breaker ─────────────────────────────────────────────────────
 
   describe('circuit breaker', () => {
-    it('trips open after MAX_ORDERS_PER_MINUTE orders in the same minute', async () => {
-      // Drive many run cycles where the balance is always below min to force orders
-      mockBalance.getBalance.mockResolvedValue({
-        balance: 10_000_000_000_000,
-        updatedAt: new Date(),
-      });
-      mockOrderBook.getOrderBook.mockResolvedValue(emptyBook());
-
-      // Exhaust the circuit breaker manually (20 orders per minute)
+    it('trips open after MAX_ORDERS_PER_MINUTE orders in the same minute', () => {
+      // Directly exercise the circuit-breaker counter so the test is independent
+      // of system clock resolution and run() scheduling. The CB is intended to
+      // trip once the AI Participant has placed MAX_ORDERS_PER_MINUTE (20) orders
+      // through _placeOrder within a rolling minute.
+      const internal = service as unknown as { _incrementCircuitBreaker: () => void };
       for (let i = 0; i < 20; i++) {
-        await service.run();
+        internal._incrementCircuitBreaker();
       }
 
-      // After hitting the limit the circuit breaker should open
       const status = service.getStatus();
-      // Either the CB tripped or no more orders were placed (acceptable either way)
-      expect(status.circuitBreakerOpen || mockOrderBook.createOrder.mock.calls.length <= 20).toBe(
-        true,
-      );
+      expect(status.circuitBreakerOpen).toBe(true);
     });
   });
 });
