@@ -268,6 +268,18 @@ jobs:
               docker rm -f "$c" 2>/dev/null || true
             done
 
+            # ── One-shot DB reset: prior aborted runs left postgres/redis
+            # volumes tagged with the wrong project label and credentials that
+            # no longer match the current .env. Wipe them on the first
+            # successful deploy run only (marker keeps subsequent deploys safe).
+            if [ ! -f .deploy-volumes-initialized ]; then
+              echo "[bootstrap] Resetting stale data volumes (first successful deploy)"
+              for v in promptgenie_postgres_data promptgenie_redis_data promptgenie_app_logs promptgenie_app_uploads; do
+                docker volume rm -f "$v" 2>/dev/null || true
+              done
+              touch .deploy-volumes-initialized
+            fi
+
             bash scripts/deploy.sh deploy
 
       - name: API smoke test
