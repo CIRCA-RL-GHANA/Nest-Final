@@ -166,7 +166,7 @@ export class CreateQPointsMarketTables1700001200000 implements MigrationInterfac
           {
             name: 'balance',
             type: 'decimal',
-            precision: 18,
+            precision: 28,
             scale: 4,
             default: 0,
           },
