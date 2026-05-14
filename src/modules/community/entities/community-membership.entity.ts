@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -43,6 +43,6 @@ export class CommunityMembership extends BaseEntity {
   banReason: string | null;
 
   @ApiProperty({ description: 'Invite token for pending invitations', required: false })
-  @Column({ length: 100, nullable: true })
+  @Column({ type: 'varchar', length: 100, nullable: true })
   inviteToken: string | null;
 }

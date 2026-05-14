@@ -1,10 +1,10 @@
-import { Entity, Column, ManyToOne, JoinColumn, Index, BeforeInsert } from 'typeorm';
+﻿import { Entity, Column, ManyToOne, JoinColumn, Index, BeforeInsert } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import * as bcrypt from 'bcrypt';
 import { BaseEntity } from '@/common/entities/base.entity';
 import { User } from './user.entity';
 
-// Owner is the individual entity creator — not an assignable staff role.
+// Owner is the individual entity creator â€” not an assignable staff role.
 // It is granted automatically and can only exist under EntityType.INDIVIDUAL.
 export enum StaffRole {
   ADMINISTRATOR = 'Administrator',
@@ -46,7 +46,7 @@ export class Staff extends BaseEntity {
   @Column({ type: 'enum', enum: StaffRole })
   role: StaffRole;
 
-  @Column({ select: false })
+  @Column({ type: 'varchar', select: false })
   pinHash: string;
 
   @ApiProperty({
@@ -61,7 +61,7 @@ export class Staff extends BaseEntity {
     description: 'Whether the staff assignment is active',
     example: true,
   })
-  @Column({ default: true })
+  @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
   @ApiProperty({

@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -7,7 +7,7 @@ import { BaseEntity } from '@/common/entities/base.entity';
 @Index(['createdAt'])
 export class DeliveryPackage extends BaseEntity {
   @ApiProperty({ description: 'Package number', example: 'PKG-2026-00001' })
-  @Column({ unique: true, length: 50 })
+  @Column({ type: 'varchar', unique: true, length: 50 })
   packageNumber: string;
 
   @ApiProperty({ description: 'Driver ID' })

@@ -1,4 +1,4 @@
-import { Entity, Column, Index, BeforeInsert } from 'typeorm';
+﻿import { Entity, Column, Index, BeforeInsert } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import * as bcrypt from 'bcrypt';
 import { BaseEntity } from '@/common/entities/base.entity';
@@ -6,7 +6,7 @@ import { BaseEntity } from '@/common/entities/base.entity';
 export enum UserRole {
   ADMIN = 'admin',
   USER = 'user',
-  // ── Financial Institution roles ──────────────────────────────────────────
+  // â”€â”€ Financial Institution roles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   /** Top-level FI entity owner: full access to loans, deposits, insurance, credit-data. */
   FINANCIAL_INSTITUTION = 'financial_institution',
   /** FI staff: can read & create/approve loans. */
@@ -15,7 +15,7 @@ export enum UserRole {
   FI_TELLER = 'fi_teller',
   /** FI staff: read-only auditor. */
   FI_AUDITOR = 'fi_auditor',
-  // ── Enterprise roles ──────────────────────────────────────────────────────
+  // â”€â”€ Enterprise roles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   /** Enterprise entity owner: full access to enterprise onboarding, API keys, channels, fulfillment, and concierge. */
   ENTERPRISE_ADMIN = 'enterprise_admin',
   /** Enterprise operator: can manage channels, fulfillment tasks, and concierge sessions; cannot modify billing or API keys. */
@@ -30,7 +30,7 @@ export class User extends BaseEntity {
     description: 'User phone number (unique identifier)',
     example: '+1234567890',
   })
-  @Column({ unique: true })
+  @Column({ type: 'varchar', unique: true })
   @Index()
   phoneNumber: string;
 
@@ -39,7 +39,7 @@ export class User extends BaseEntity {
     example: 'john_doe',
     required: false,
   })
-  @Column({ unique: true, nullable: true })
+  @Column({ type: 'varchar', unique: true, nullable: true })
   @Index()
   socialUsername: string | null;
 
@@ -48,25 +48,25 @@ export class User extends BaseEntity {
     example: '@johndoe',
     required: false,
   })
-  @Column({ unique: true, nullable: true })
+  @Column({ type: 'varchar', unique: true, nullable: true })
   @Index()
   wireId: string | null;
 
-  @Column({ select: false, nullable: true })
+  @Column({ type: 'varchar', select: false, nullable: true })
   passwordHash: string | null;
 
   @ApiProperty({
     description: 'Whether biometric verification is enabled',
     example: false,
   })
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   biometricVerified: boolean;
 
   @ApiProperty({
     description: 'Whether OTP verification is completed',
     example: false,
   })
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   otpVerified: boolean;
 
   @ApiProperty({

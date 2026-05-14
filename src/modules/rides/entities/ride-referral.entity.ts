@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -22,7 +22,7 @@ export class RideReferral extends BaseEntity {
   refereeId: string;
 
   @ApiProperty({ description: 'Referral code', example: 'REF123ABC' })
-  @Column({ unique: true, length: 20 })
+  @Column({ type: 'varchar', unique: true, length: 20 })
   referralCode: string;
 
   @ApiProperty({ description: 'Referral status', enum: ReferralStatus })

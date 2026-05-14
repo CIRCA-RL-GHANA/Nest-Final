@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -35,7 +35,7 @@ export enum CommunityVisibility {
 @Index(['name'])
 export class Community extends BaseEntity {
   @ApiProperty({ description: 'Community name', example: 'Afrobeats Book Club' })
-  @Column({ length: 200 })
+  @Column({ type: 'varchar', length: 200 })
   name: string;
 
   @ApiProperty({ description: 'Short description of the community', required: false })
@@ -59,7 +59,7 @@ export class Community extends BaseEntity {
   ownerId: string;
 
   @ApiProperty({ description: 'Cover / banner image URL', required: false })
-  @Column({ length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 500, nullable: true })
   coverUrl: string | null;
 
   @ApiProperty({ description: 'Member count (denormalised for fast reads)', example: 0 })
@@ -78,6 +78,6 @@ export class Community extends BaseEntity {
   metadata: Record<string, unknown> | null;
 
   @ApiProperty({ description: 'Tags for discovery', required: false })
-  @Column({ length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 500, nullable: true })
   tags: string | null;
 }

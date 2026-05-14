@@ -1,4 +1,4 @@
-import {
+﻿import {
   Entity,
   Column,
   Index,
@@ -46,7 +46,7 @@ export class QPointMarketNotification {
   data: Record<string, unknown> | null;
 
   @ApiProperty({ description: 'Whether the user has read this notification', example: false })
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   read: boolean;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp with time zone' })

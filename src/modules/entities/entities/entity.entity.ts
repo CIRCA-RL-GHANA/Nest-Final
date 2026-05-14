@@ -1,4 +1,4 @@
-import { Entity, Column, Index, ManyToOne, JoinColumn } from 'typeorm';
+﻿import { Entity, Column, Index, ManyToOne, JoinColumn } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 import { User } from '../../users/entities/user.entity';
@@ -34,7 +34,7 @@ export class EntityProfile extends BaseEntity {
     description: 'Wire ID (unique identifier)',
     example: '@johndoe',
   })
-  @Column({ unique: true })
+  @Column({ type: 'varchar', unique: true })
   @Index()
   wireId: string;
 
@@ -42,7 +42,7 @@ export class EntityProfile extends BaseEntity {
     description: 'Social username',
     example: 'john_doe',
   })
-  @Column({ unique: true })
+  @Column({ type: 'varchar', unique: true })
   @Index()
   socialUsername: string;
 
@@ -95,7 +95,7 @@ export class EntityProfile extends BaseEntity {
     description: 'Whether the entity is verified',
     example: false,
   })
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   verified: boolean;
 
   @ApiProperty({

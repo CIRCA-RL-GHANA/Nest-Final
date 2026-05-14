@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -22,7 +22,7 @@ export enum ModelStatus {
 @Index(['status'])
 export class AIModel extends BaseEntity {
   @ApiProperty({ description: 'Model name', example: 'product-recommendation-v1' })
-  @Column({ unique: true, length: 100 })
+  @Column({ type: 'varchar', unique: true, length: 100 })
   name: string;
 
   @ApiProperty({ description: 'Model type', enum: ModelType })
@@ -30,7 +30,7 @@ export class AIModel extends BaseEntity {
   modelType: ModelType;
 
   @ApiProperty({ description: 'Model version', example: '1.0.0' })
-  @Column({ length: 20 })
+  @Column({ type: 'varchar', length: 20 })
   version: string;
 
   @ApiProperty({ description: 'Model status', enum: ModelStatus })

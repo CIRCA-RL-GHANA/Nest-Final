@@ -1,4 +1,4 @@
-import { Entity, Column, Index, ManyToOne, JoinColumn } from 'typeorm';
+﻿import { Entity, Column, Index, ManyToOne, JoinColumn } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 import { EntityProfile } from '../../entities/entities/entity.entity';
@@ -28,21 +28,21 @@ export class QPointAccount extends BaseEntity {
     description: 'Currency code',
     example: 'QP',
   })
-  @Column({ default: 'QP' })
+  @Column({ type: 'varchar', default: 'QP' })
   currency: string;
 
   @ApiProperty({
     description: 'Whether the account is active',
     example: true,
   })
-  @Column({ default: true })
+  @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
   @ApiProperty({
     description: 'Whether the account is frozen',
     example: false,
   })
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   isFrozen: boolean;
 
   @ApiProperty({

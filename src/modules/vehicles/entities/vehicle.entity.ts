@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -19,14 +19,14 @@ export class Vehicle extends BaseEntity {
     description: 'Vehicle type',
     example: 'Sedan',
   })
-  @Column({ length: 50 })
+  @Column({ type: 'varchar', length: 50 })
   type: string;
 
   @ApiProperty({
     description: 'Plate number',
     example: 'ABC-1234',
   })
-  @Column({ unique: true, length: 20 })
+  @Column({ type: 'varchar', unique: true, length: 20 })
   plateNumber: string;
 
   @ApiProperty({

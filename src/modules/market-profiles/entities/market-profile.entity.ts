@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -22,7 +22,7 @@ export class MarketProfile extends BaseEntity {
     description: 'Unique market identifier',
     example: 'MKT-TECH-2024-001',
   })
-  @Column({ unique: true })
+  @Column({ type: 'varchar', unique: true })
   uniqueMarketIdentifier: string;
 
   @ApiProperty({

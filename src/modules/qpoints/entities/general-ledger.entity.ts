@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -18,7 +18,7 @@ export class GeneralLedger extends BaseEntity {
     description: 'Account code',
     example: '1000',
   })
-  @Column({ unique: true })
+  @Column({ type: 'varchar', unique: true })
   accountCode: string;
 
   @ApiProperty({

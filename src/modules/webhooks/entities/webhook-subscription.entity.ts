@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -18,7 +18,7 @@ export class WebhookSubscription extends BaseEntity {
   secretHash: string;
 
   @ApiProperty({ description: 'First 8 chars of secret for display' })
-  @Column({ length: 8 })
+  @Column({ type: 'varchar', length: 8 })
   secretPrefix: string;
 
   @ApiProperty({ description: 'List of event types subscribed to', type: [String] })
@@ -26,15 +26,15 @@ export class WebhookSubscription extends BaseEntity {
   events: string[];
 
   @ApiProperty({ description: 'Whether the subscription is active' })
-  @Column({ default: true })
+  @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
   @ApiProperty({ description: 'Number of successful deliveries' })
-  @Column({ default: 0 })
+  @Column({ type: 'int', default: 0 })
   deliveryCount: number;
 
   @ApiProperty({ description: 'Number of consecutive failures' })
-  @Column({ default: 0 })
+  @Column({ type: 'int', default: 0 })
   failureCount: number;
 
   @ApiProperty({ nullable: true })

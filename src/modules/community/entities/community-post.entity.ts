@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -29,7 +29,7 @@ export class CommunityPost extends BaseEntity {
   type: PostType;
 
   @ApiProperty({ description: 'Post title / headline', required: false })
-  @Column({ length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 500, nullable: true })
   title: string | null;
 
   @ApiProperty({ description: 'Post body text', required: false })

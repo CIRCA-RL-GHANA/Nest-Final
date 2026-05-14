@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -20,11 +20,11 @@ export class AIEvent extends BaseEntity {
   eventType: EventType;
 
   @ApiProperty({ description: 'Event name' })
-  @Column({ length: 100 })
+  @Column({ type: 'varchar', length: 100 })
   eventName: string;
 
   @ApiProperty({ description: 'Entity type' })
-  @Column({ length: 50 })
+  @Column({ type: 'varchar', length: 50 })
   entityType: string;
 
   @ApiProperty({ description: 'Entity ID' })

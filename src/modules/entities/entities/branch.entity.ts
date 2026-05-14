@@ -1,4 +1,4 @@
-import { Entity, Column, Index, ManyToOne, JoinColumn } from 'typeorm';
+﻿import { Entity, Column, Index, ManyToOne, JoinColumn } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 import { EntityProfile } from './entity.entity';
@@ -10,7 +10,7 @@ export enum BranchType {
   PICKUP_POINT = 'Pickup Point',
   DELIVERY_HUB = 'Delivery Hub',
   SERVICE_CENTER = 'Service Center',
-  // Content creation is a commercial activity — operated under a Digital branch.
+  // Content creation is a commercial activity â€” operated under a Digital branch.
   DIGITAL = 'Digital',
 }
 
@@ -70,7 +70,7 @@ export class Branch extends BaseEntity {
     description: 'Whether the branch subscription is active',
     example: false,
   })
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   subscriptionActive: boolean;
 
   @ApiProperty({

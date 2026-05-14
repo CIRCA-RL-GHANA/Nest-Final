@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -14,7 +14,7 @@ export enum FeatureType {
 @Index(['featureName'])
 export class AIFeature extends BaseEntity {
   @ApiProperty({ description: 'Entity type (user, product, order, etc.)' })
-  @Column({ length: 50 })
+  @Column({ type: 'varchar', length: 50 })
   entityType: string;
 
   @ApiProperty({ description: 'Entity ID' })
@@ -22,7 +22,7 @@ export class AIFeature extends BaseEntity {
   entityId: string;
 
   @ApiProperty({ description: 'Feature name' })
-  @Column({ length: 100 })
+  @Column({ type: 'varchar', length: 100 })
   featureName: string;
 
   @ApiProperty({ description: 'Feature type', enum: FeatureType })
@@ -34,7 +34,7 @@ export class AIFeature extends BaseEntity {
   featureValue: any;
 
   @ApiProperty({ description: 'Feature version' })
-  @Column({ length: 20, default: '1.0.0' })
+  @Column({ type: 'varchar', length: 20, default: '1.0.0' })
   version: string;
 
   @ApiProperty({ description: 'Feature metadata', type: 'object', required: false })

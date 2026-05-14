@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -11,7 +11,7 @@ export enum TransactionType {
   REWARD = 'Reward',
   FEE = 'Fee',
   PENALTY = 'Penalty',
-  // ── Financial Institution Extension ──────────────────────────────────────
+  // â”€â”€ Financial Institution Extension â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   LOAN_DISBURSEMENT = 'LoanDisbursement',
   LOAN_REPAYMENT = 'LoanRepayment',
   LOAN_ORIGINATION_FEE = 'LoanOriginationFee',
@@ -88,7 +88,7 @@ export class QPointTransaction extends BaseEntity {
     description: 'Transaction reference/ID',
     example: 'TXN-20240101-123456',
   })
-  @Column({ unique: true })
+  @Column({ type: 'varchar', unique: true })
   @Index()
   reference: string;
 

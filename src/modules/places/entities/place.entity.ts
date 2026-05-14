@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -19,14 +19,14 @@ export class Place extends BaseEntity {
     description: 'Unique place identifier',
     example: 'PLC-2024-001',
   })
-  @Column({ unique: true, length: 50 })
+  @Column({ type: 'varchar', unique: true, length: 50 })
   uniquePlaceId: string;
 
   @ApiProperty({
     description: 'Place name',
     example: 'Central Park',
   })
-  @Column({ length: 100 })
+  @Column({ type: 'varchar', length: 100 })
   name: string;
 
   @ApiProperty({
@@ -48,14 +48,14 @@ export class Place extends BaseEntity {
     description: 'Place category',
     example: 'Park',
   })
-  @Column({ length: 50 })
+  @Column({ type: 'varchar', length: 50 })
   category: string;
 
   @ApiProperty({
     description: 'Place location/address',
     example: 'New York, NY',
   })
-  @Column({ length: 255 })
+  @Column({ type: 'varchar', length: 255 })
   location: string;
 
   @ApiProperty({

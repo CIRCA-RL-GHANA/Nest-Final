@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -30,27 +30,27 @@ export class Otp extends BaseEntity {
     description: 'Whether the OTP has been verified',
     example: false,
   })
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   verified: boolean;
 
   @ApiProperty({
     description: 'Number of verification attempts',
     example: 0,
   })
-  @Column({ default: 0 })
+  @Column({ type: 'int', default: 0 })
   attempts: number;
 
   @ApiProperty({
     description: 'Maximum allowed attempts',
     example: 5,
   })
-  @Column({ default: 5 })
+  @Column({ type: 'int', default: 5 })
   maxAttempts: number;
 
   @ApiProperty({
     description: 'Type of OTP (sms, email)',
     example: 'sms',
   })
-  @Column({ default: 'sms' })
+  @Column({ type: 'varchar', default: 'sms' })
   type: string;
 }

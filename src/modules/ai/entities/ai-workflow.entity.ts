@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -16,11 +16,11 @@ export enum WorkflowStatus {
 @Index(['createdAt'])
 export class AIWorkflow extends BaseEntity {
   @ApiProperty({ description: 'Workflow name' })
-  @Column({ length: 100 })
+  @Column({ type: 'varchar', length: 100 })
   workflowName: string;
 
   @ApiProperty({ description: 'Workflow type' })
-  @Column({ length: 50 })
+  @Column({ type: 'varchar', length: 50 })
   workflowType: string;
 
   @ApiProperty({ description: 'Workflow status', enum: WorkflowStatus })

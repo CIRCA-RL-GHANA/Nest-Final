@@ -1,4 +1,4 @@
-import { Entity, Column } from 'typeorm';
+﻿import { Entity, Column } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -26,16 +26,16 @@ export class InstitutionConfig extends BaseEntity {
   @Column({ type: 'bigint', default: 0 })
   mintedSupply: number;
 
-  @ApiProperty({ description: 'Facility fee rate applied on inter-entity settlement (0–1)' })
+  @ApiProperty({ description: 'Facility fee rate applied on inter-entity settlement (0â€“1)' })
   @Column({ type: 'decimal', precision: 6, scale: 5, default: 0.001 })
   facilityFeeRate: number;
 
   @ApiProperty({ description: 'Whether institutional issuance is active' })
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   isActive: boolean;
 
   @ApiProperty({ description: 'KYB/AML verification status' })
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   dueDiligenceCleared: boolean;
 
   @ApiProperty({ description: 'Last net-settlement timestamp', nullable: true })

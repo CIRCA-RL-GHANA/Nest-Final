@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -25,7 +25,7 @@ export enum AccessModel {
 
 /**
  * A piece of digital IP content uploaded by a creator.
- * Content is NOT downloaded — it lives in the user's cloud locker (EplayLicense).
+ * Content is NOT downloaded â€” it lives in the user's cloud locker (EplayLicense).
  */
 @Entity('digital_assets')
 @Index(['creatorProfileId'])
@@ -34,7 +34,7 @@ export enum AccessModel {
 @Index(['title'])
 export class DigitalAsset extends BaseEntity {
   @ApiProperty({ description: 'Content title', example: 'Afrobeats Vol. 1' })
-  @Column({ length: 300 })
+  @Column({ type: 'varchar', length: 300 })
   title: string;
 
   @ApiProperty({ description: 'Content description', required: false })
@@ -66,11 +66,11 @@ export class DigitalAsset extends BaseEntity {
   rentalDurationDays: number | null;
 
   @ApiProperty({ description: 'Cover art / thumbnail URL' })
-  @Column({ length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 500, nullable: true })
   coverUrl: string | null;
 
-  @ApiProperty({ description: 'Encrypted storage reference (S3 key or CDN token — never raw URL)' })
-  @Column({ length: 500 })
+  @ApiProperty({ description: 'Encrypted storage reference (S3 key or CDN token â€” never raw URL)' })
+  @Column({ type: 'varchar', length: 500 })
   encryptedStorageRef: string;
 
   @ApiProperty({ description: 'Duration in seconds (audio/video)', required: false })
@@ -82,7 +82,7 @@ export class DigitalAsset extends BaseEntity {
   fileSizeBytes: number | null;
 
   @ApiProperty({ description: 'Comma-separated genre tags', required: false })
-  @Column({ length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 500, nullable: true })
   tags: string | null;
 
   @ApiProperty({ description: 'ISO 3166-1 alpha-2 geo-restriction codes (empty = no restriction)', required: false })

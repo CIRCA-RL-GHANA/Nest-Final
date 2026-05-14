@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -15,7 +15,7 @@ export class OrderItem extends BaseEntity {
   productId: string;
 
   @ApiProperty({ description: 'Product name (snapshot)' })
-  @Column({ length: 200 })
+  @Column({ type: 'varchar', length: 200 })
   productName: string;
 
   @ApiProperty({ description: 'Quantity', example: 2 })

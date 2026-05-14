@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -35,7 +35,7 @@ export class AIRecommendation extends BaseEntity {
   reason: string;
 
   @ApiProperty({ description: 'Algorithm used' })
-  @Column({ length: 100 })
+  @Column({ type: 'varchar', length: 100 })
   algorithm: string;
 
   @ApiProperty({ description: 'Whether user viewed the recommendation' })

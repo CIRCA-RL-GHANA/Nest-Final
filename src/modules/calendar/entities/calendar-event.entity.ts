@@ -1,4 +1,4 @@
-import { Entity, Column, ManyToOne, JoinColumn, Index } from 'typeorm';
+﻿import { Entity, Column, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 import { User } from '@/modules/users/entities/user.entity';
@@ -47,7 +47,7 @@ export class CalendarEvent extends BaseEntity {
     description: 'Whether the event is recurring',
     example: false,
   })
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   recurring: boolean;
 
   @ApiProperty({
@@ -78,7 +78,7 @@ export class CalendarEvent extends BaseEntity {
     description: 'Whether user should be reminded',
     example: true,
   })
-  @Column({ default: true })
+  @Column({ type: 'boolean', default: true })
   reminderEnabled: boolean;
 
   @ApiProperty({

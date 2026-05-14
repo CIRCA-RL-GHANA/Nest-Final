@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -21,11 +21,11 @@ export enum PluginType {
 @Index(['status'])
 export class AIPlugin extends BaseEntity {
   @ApiProperty({ description: 'Plugin name (unique)' })
-  @Column({ length: 100, unique: true })
+  @Column({ type: 'varchar', length: 100, unique: true })
   name!: string;
 
   @ApiProperty({ description: 'Human-readable description' })
-  @Column({ length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 500, nullable: true })
   description!: string | null;
 
   @ApiProperty({ description: 'Plugin type', enum: PluginType })
@@ -33,7 +33,7 @@ export class AIPlugin extends BaseEntity {
   pluginType!: PluginType;
 
   @ApiProperty({ description: 'Plugin version', example: '1.0.0' })
-  @Column({ length: 20, default: '1.0.0' })
+  @Column({ type: 'varchar', length: 20, default: '1.0.0' })
   version!: string;
 
   @ApiProperty({ description: 'Plugin status', enum: PluginStatus })

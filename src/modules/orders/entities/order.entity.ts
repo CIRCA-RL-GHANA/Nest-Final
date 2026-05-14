@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -27,7 +27,7 @@ export enum PaymentMethod {
 @Index(['createdAt'])
 export class Order extends BaseEntity {
   @ApiProperty({ description: 'Order number', example: 'ORD-2026-00001' })
-  @Column({ unique: true, length: 50 })
+  @Column({ type: 'varchar', unique: true, length: 50 })
   orderNumber: string;
 
   @ApiProperty({ description: 'Buyer ID' })

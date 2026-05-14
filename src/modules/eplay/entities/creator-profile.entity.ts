@@ -1,4 +1,4 @@
-import { Entity, Column, Index } from 'typeorm';
+﻿import { Entity, Column, Index } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/entities/base.entity';
 
@@ -11,7 +11,7 @@ export enum CreatorTier {
 /**
  * A creator's "digital branch" on e-Play.
  * Every creator that wants to sell digital content must open a
- * CreatorProfile — the equivalent of a merchant profile for IP.
+ * CreatorProfile â€” the equivalent of a merchant profile for IP.
  */
 @Entity('creator_profiles')
 @Index(['userId'], { unique: true })
@@ -23,7 +23,7 @@ export class CreatorProfile extends BaseEntity {
   userId: string;
 
   @ApiProperty({ description: 'Public display name / artist name', example: 'KobiBeat' })
-  @Column({ length: 200 })
+  @Column({ type: 'varchar', length: 200 })
   displayName: string;
 
   @ApiProperty({ description: 'Short bio', required: false })
@@ -31,11 +31,11 @@ export class CreatorProfile extends BaseEntity {
   bio: string | null;
 
   @ApiProperty({ description: 'Profile avatar URL', required: false })
-  @Column({ length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 500, nullable: true })
   avatarUrl: string | null;
 
   @ApiProperty({ description: 'Banner image URL', required: false })
-  @Column({ length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 500, nullable: true })
   bannerUrl: string | null;
 
   @ApiProperty({ enum: CreatorTier, default: CreatorTier.INDIE })
