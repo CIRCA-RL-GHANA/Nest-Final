@@ -302,11 +302,25 @@ export class CreateQPointsMarketTables1700001200000 implements MigrationInterfac
     );
 
     // ----------------------------------------------- AI participant seed row
-    // NOTE: The AI participant UUID must also exist in the users table.
-    // This migration inserts only the balance row; the users seed is separate.
+    // Ensure the AI participant user exists before seeding its balance.
     // Genesis allocation: entire fixed supply (500 trillion QP) goes to the AI market maker.
     // No new QP can ever be minted beyond this cap — all human balances are funded
     // exclusively by the AI distributing from its own position.
+    await queryRunner.query(`
+      INSERT INTO users (
+        id, email, password_hash, first_name, last_name, user_type, account_status
+      ) VALUES (
+        '00000000-0000-0000-0000-000000000001',
+        'ai-market-maker@system.local',
+        'NOT_A_REAL_PASSWORD_SYSTEM_ACCOUNT',
+        'AI',
+        'MarketMaker',
+        'ADMIN',
+        'ACTIVE'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
     await queryRunner.query(`
       INSERT INTO q_point_market_balances (user_id, balance)
       VALUES ('00000000-0000-0000-0000-000000000001', 500000000000000)
