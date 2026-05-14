@@ -261,6 +261,13 @@ jobs:
             fi
 
             # ── Run the real deploy ──────────────────────────────────────────
+            # Clean up any orphan/stale containers from prior aborted runs so
+            # 'docker compose up' isn't blocked by "name in use" conflicts.
+            docker compose -f /opt/promptgenie/docker-compose.prod.yml down --remove-orphans --timeout 10 || true
+            for c in promptgenie-app promptgenie-postgres promptgenie-redis promptgenie-nginx promptgenie-certbot; do
+              docker rm -f "$c" 2>/dev/null || true
+            done
+
             bash scripts/deploy.sh deploy
 
       - name: API smoke test
