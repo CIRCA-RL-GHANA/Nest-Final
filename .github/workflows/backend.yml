@@ -119,6 +119,29 @@ jobs:
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          echo "=== Derived public key from secret ==="
+          ssh-keygen -y -f ~/.ssh/deploy_key
+          echo "=== Key fingerprint ==="
+          ssh-keygen -lf ~/.ssh/deploy_key
+
+      - name: SSH connectivity probe (verbose)
+        continue-on-error: true
+        run: |
+          set +e
+          ssh -vvv \
+            -i ~/.ssh/deploy_key \
+            -p ${{ secrets.DEPLOY_PORT || 22 }} \
+            -o StrictHostKeyChecking=no \
+            -o IdentitiesOnly=yes \
+            -o IdentityAgent=none \
+            -o PreferredAuthentications=publickey \
+            -o NumberOfPasswordPrompts=0 \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            'echo CONNECTED_OK; id; hostname; ls -la ~/.ssh/; stat -c "%a %U:%G %n" ~/.ssh ~/.ssh/authorized_keys; head -c 200 ~/.ssh/authorized_keys; echo; grep -Ei "^[^#]*(pubkey|password|permitroot|maxauth|authorizedkeysfile|strictmodes)" /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null' \
+            2>&1 | tail -120
+          echo "=== probe exit $? ==="
 
       # ── Sync entire repo to VPS (NestJS app + infra at root) ──────────────
       - name: Rsync to VPS
