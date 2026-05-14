@@ -299,6 +299,40 @@ jobs:
               done
             done
 
+            # ── Bootstrap SSL certs for the dockerized nginx ─────────────────
+            # The dockerized nginx mounts /opt/promptgenie/certbot/conf as
+            # /etc/letsencrypt. If the VPS already had certs under the host
+            # /etc/letsencrypt (from a prior host-nginx setup), copy them in.
+            # Otherwise issue fresh certs with certbot standalone before
+            # bringing nginx up. This guarantees the HTTPS smoke test passes.
+            mkdir -p /opt/promptgenie/certbot/conf /opt/promptgenie/certbot/www
+            API_DOMAIN_VAR="${API_DOMAIN:-api.genieinprompt.app}"
+            DOCKER_CERT_PATH="/opt/promptgenie/certbot/conf/live/${API_DOMAIN_VAR}/fullchain.pem"
+            HOST_CERT_PATH="/etc/letsencrypt/live/${API_DOMAIN_VAR}/fullchain.pem"
+            if [ ! -f "$DOCKER_CERT_PATH" ]; then
+              if [ -f "$HOST_CERT_PATH" ]; then
+                echo "[bootstrap] Copying existing host letsencrypt certs into docker cert path"
+                cp -aL /etc/letsencrypt/. /opt/promptgenie/certbot/conf/ 2>/dev/null \
+                  || cp -a /etc/letsencrypt/. /opt/promptgenie/certbot/conf/ \
+                  || echo "[WARN] cert copy failed; will attempt certbot standalone"
+              fi
+            fi
+            if [ ! -f "$DOCKER_CERT_PATH" ]; then
+              echo "[bootstrap] Issuing fresh SSL cert via certbot standalone for ${API_DOMAIN_VAR}"
+              docker run --rm -p 80:80 \
+                -v /opt/promptgenie/certbot/conf:/etc/letsencrypt \
+                -v /opt/promptgenie/certbot/www:/var/www/certbot \
+                certbot/certbot certonly --standalone --agree-tos --no-eff-email \
+                --email "admin@${FRONTEND_DOMAIN:-genieinprompt.app}" \
+                --domain "${API_DOMAIN_VAR}" --non-interactive 2>&1 \
+                || echo "[WARN] certbot failed — nginx will run in HTTP-only bootstrap mode"
+            fi
+            if [ -f "$DOCKER_CERT_PATH" ]; then
+              echo "[bootstrap] SSL cert ready at $DOCKER_CERT_PATH"
+            else
+              echo "[WARN] No SSL cert available; HTTPS smoke test will fail. App will still be reachable on HTTP."
+            fi
+
             # ── One-shot DB reset: prior aborted runs left postgres/redis
             # volumes tagged with the wrong project label and credentials that
             # no longer match the current .env. Wipe them on the first
