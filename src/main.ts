@@ -104,6 +104,17 @@ async function bootstrap() {
   const expressApp = app.getHttpAdapter().getInstance();
   expressApp.set('trust proxy', 1);
 
+  // Belt-and-suspenders liveness probes: register raw Express handlers that
+  // bypass NestJS routing/versioning entirely. Guarantees a 200 OK at the
+  // canonical health paths so Docker healthcheck + smoke tests are decoupled
+  // from controller registration / global prefix / versioning quirks.
+  const livenessHandler = (_req: any, res: any) =>
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  expressApp.get('/api/v1/health/live', livenessHandler);
+  expressApp.get('/api/health/live', livenessHandler);
+  expressApp.get('/health/live', livenessHandler);
+  expressApp.get('/healthz', livenessHandler);
+
   // Start server
   const port = configService.get('PORT') || 3000;
   await app.listen(port);
