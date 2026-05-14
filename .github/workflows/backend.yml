@@ -164,12 +164,103 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           command_timeout: 15m
+          envs: API_DOMAIN,FRONTEND_DOMAIN,SENDGRID_API_KEY,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,AI_API_KEY
           script: |
             set -euo pipefail
             cd /opt/promptgenie
-            # scripts/deploy.sh is the single source of truth for deploy logic.
-            # It handles: preflight → tag :previous → build → wait-healthy →
-            # migrate → up --remove-orphans → health check.
+
+            # ── Ensure Docker + Compose are installed ────────────────────────
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "[bootstrap] Installing Docker"
+              curl -fsSL https://get.docker.com | sh
+              systemctl enable --now docker
+            fi
+            if ! docker compose version >/dev/null 2>&1; then
+              echo "[bootstrap] Installing docker compose plugin"
+              apt-get update -y && apt-get install -y docker-compose-plugin || true
+            fi
+
+            # ── Bootstrap .env on first run (idempotent) ─────────────────────
+            if [ ! -f .env ]; then
+              echo "[bootstrap] Generating fresh .env with secure random secrets"
+              JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
+              JWT_REFRESH_SECRET=$(openssl rand -base64 64 | tr -d '\n')
+              DB_PASSWORD=$(openssl rand -base64 32 | tr -d '+/=\n' | head -c 32)
+              REDIS_PASSWORD=$(openssl rand -base64 32 | tr -d '+/=\n' | head -c 32)
+              PIN_ENCRYPTION_KEY=$(openssl rand -hex 32)
+              PIN_ENCRYPTION_IV=$(openssl rand -hex 16)
+              ML_MODEL_SIGNING_SECRET=$(openssl rand -hex 32)
+              WEBHOOK_SECRET=$(openssl rand -hex 20)
+              API_DOMAIN="${API_DOMAIN:-api.genieinprompt.app}"
+              FRONTEND_DOMAIN="${FRONTEND_DOMAIN:-genieinprompt.app}"
+
+              cat > .env <<EOF
+            NODE_ENV=production
+            PORT=3000
+            API_PREFIX=api
+            API_VERSION=v1
+            APP_NAME=promptgenie
+
+            # Database
+            DB_HOST=postgres
+            DB_PORT=5432
+            DB_USERNAME=postgres
+            DB_PASSWORD=${DB_PASSWORD}
+            DB_NAME=promptgenie
+            DB_SYNCHRONIZE=false
+            DB_LOGGING=false
+            DB_SSL=false
+
+            # Redis
+            REDIS_HOST=redis
+            REDIS_PORT=6379
+            REDIS_PASSWORD=${REDIS_PASSWORD}
+            REDIS_DB=0
+
+            # JWT
+            JWT_SECRET=${JWT_SECRET}
+            JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+            JWT_EXPIRES_IN=7d
+            JWT_REFRESH_EXPIRES_IN=30d
+
+            # Security
+            BCRYPT_ROUNDS=12
+            PIN_ENCRYPTION_KEY=${PIN_ENCRYPTION_KEY}
+            PIN_ENCRYPTION_IV=${PIN_ENCRYPTION_IV}
+            ML_MODEL_SIGNING_SECRET=${ML_MODEL_SIGNING_SECRET}
+
+            # CORS & Domains
+            API_DOMAIN=${API_DOMAIN}
+            FRONTEND_DOMAIN=${FRONTEND_DOMAIN}
+            CORS_ORIGIN=https://${FRONTEND_DOMAIN},https://www.${FRONTEND_DOMAIN}
+            CORS_CREDENTIALS=true
+
+            # Payment Facilitator (configure later)
+            PAYMENT_FACILITATOR_PROVIDER=stripe
+            PAYMENT_FACILITATOR_SECRET_KEY=sk_live_NOT_CONFIGURED
+            PAYMENT_FACILITATOR_WEBHOOK_SECRET=${WEBHOOK_SECRET}
+            PAYMENT_FACILITATOR_CURRENCY=USD
+
+            # Optional third-party (populate later via VPS env update)
+            SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
+            EMAIL_FROM=noreply@${FRONTEND_DOMAIN}
+            TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+            TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+            TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
+            AI_API_KEY=${AI_API_KEY:-}
+            AI_BASE_URL=https://api.openai.com/v1
+            AI_MODEL=gpt-4o-mini
+
+            # Logging
+            LOG_LEVEL=info
+            EOF
+              chmod 600 .env
+              echo "[bootstrap] .env created ($(wc -l < .env) lines)"
+            else
+              echo "[bootstrap] .env already exists at $(pwd)/.env"
+            fi
+
+            # ── Run the real deploy ──────────────────────────────────────────
             bash scripts/deploy.sh deploy
 
       - name: API smoke test
