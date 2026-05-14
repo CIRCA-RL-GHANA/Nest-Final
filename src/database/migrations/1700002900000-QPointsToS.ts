@@ -63,8 +63,7 @@ export class QPointsToSMigration1700002900000 implements MigrationInterface {
     // Comment the table for database documentation
     await queryRunner.query(`
       COMMENT ON TABLE "qpoints_tos_acceptances" IS
-        'Append-only legal audit log of Q Points ToS acceptances per user per version. ' ||
-        'Do NOT delete or update rows. SHA-256 hash provides tamper-evident proof.';
+        'Append-only legal audit log of Q Points ToS acceptances per user per version. Do NOT delete or update rows. SHA-256 hash provides tamper-evident proof.';
     `);
   }
 
