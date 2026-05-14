@@ -1,4 +1,4 @@
-import { MigrationInterface, QueryRunner } from 'typeorm';
+﻿import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
  * CommunityModule1700002800000
@@ -9,52 +9,70 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *   - community_posts       : Posts / feed items within a community
  *
  * Governance notes:
- *  - community_memberships.role controls permissions (OWNER → ADMIN → MODERATOR → MEMBER)
+ *  - community_memberships.role controls permissions (OWNER â†’ ADMIN â†’ MODERATOR â†’ MEMBER)
  *  - Banning sets status = 'banned' and records the reason.
  *  - community_posts.is_removed is the soft-moderation flag (avoids hard deletes for audit trail).
  *  - metadata (JSONB) stores type-specific data:
- *      HANGOUT  → { eventAt: ISO datetime, location: { lat, lng, address } }
- *      THEATER  → { linkedAssetIds: UUID[] }
- *      FAIR     → { expiresAt: ISO datetime, marketRef: UUID }
- *      PLAYLIST → { trackIds: UUID[], isLiveSession: bool }
+ *      HANGOUT  â†’ { eventAt: ISO datetime, location: { lat, lng, address } }
+ *      THEATER  â†’ { linkedAssetIds: UUID[] }
+ *      FAIR     â†’ { expiresAt: ISO datetime, marketRef: UUID }
+ *      PLAYLIST â†’ { trackIds: UUID[], isLiveSession: bool }
  */
 export class CommunityModule1700002800000 implements MigrationInterface {
   name = 'CommunityModule1700002800000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // ── Enums ──────────────────────────────────────────────────────────────
+    // â”€â”€ Enums â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "community_type_enum" AS ENUM (
-        'library', 'playlist', 'theater', 'fair', 'hub', 'hangout', 'journal'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "community_type_enum" AS ENUM (
+          'library', 'playlist', 'theater', 'fair', 'hub', 'hangout', 'journal'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "community_status_enum" AS ENUM (
-        'active', 'archived', 'suspended'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "community_status_enum" AS ENUM (
+          'active', 'archived', 'suspended'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "community_visibility_enum" AS ENUM (
-        'public', 'invite_only', 'private'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "community_visibility_enum" AS ENUM (
+          'public', 'invite_only', 'private'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "member_role_enum" AS ENUM (
-        'owner', 'admin', 'moderator', 'member'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "member_role_enum" AS ENUM (
+          'owner', 'admin', 'moderator', 'member'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "member_status_enum" AS ENUM (
-        'active', 'banned', 'pending'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "member_status_enum" AS ENUM (
+          'active', 'banned', 'pending'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "post_type_enum" AS ENUM (
-        'text', 'link', 'poll', 'event', 'listing'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "post_type_enum" AS ENUM (
+          'text', 'link', 'poll', 'event', 'listing'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
 
-    // ── communities ────────────────────────────────────────────────────────
+    // â”€â”€ communities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS "communities" (
         "id"           UUID                          NOT NULL DEFAULT gen_random_uuid(),
@@ -81,7 +99,7 @@ export class CommunityModule1700002800000 implements MigrationInterface {
     await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_communities_visibility" ON "communities" ("visibility")`);
     await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_communities_name"       ON "communities" ("name")`);
 
-    // ── community_memberships ──────────────────────────────────────────────
+    // â”€â”€ community_memberships â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS "community_memberships" (
         "id"            UUID                  NOT NULL DEFAULT gen_random_uuid(),
@@ -103,7 +121,7 @@ export class CommunityModule1700002800000 implements MigrationInterface {
     await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_community_memberships_role"      ON "community_memberships" ("role")`);
     await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_community_memberships_status"    ON "community_memberships" ("status")`);
 
-    // ── community_posts ────────────────────────────────────────────────────
+    // â”€â”€ community_posts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS "community_posts" (
         "id"                UUID              NOT NULL DEFAULT gen_random_uuid(),

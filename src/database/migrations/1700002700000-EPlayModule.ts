@@ -1,4 +1,4 @@
-import { MigrationInterface, QueryRunner } from 'typeorm';
+﻿import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
  * EPlayModule1700002700000
@@ -18,34 +18,49 @@ export class EPlayModule1700002700000 implements MigrationInterface {
   name = 'EPlayModule1700002700000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // ── Enums ──────────────────────────────────────────────────────────────
+    // â”€â”€ Enums â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "digital_asset_type_enum" AS ENUM (
-        'music', 'movie', 'podcast', 'ebook', 'show'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "digital_asset_type_enum" AS ENUM (
+          'music', 'movie', 'podcast', 'ebook', 'show'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "digital_asset_status_enum" AS ENUM (
-        'draft', 'published', 'unlisted', 'removed'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "digital_asset_status_enum" AS ENUM (
+          'draft', 'published', 'unlisted', 'removed'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "access_model_enum" AS ENUM (
-        'perpetual', 'rental', 'subscription'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "access_model_enum" AS ENUM (
+          'perpetual', 'rental', 'subscription'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "license_status_enum" AS ENUM (
-        'active', 'expired', 'revoked'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "license_status_enum" AS ENUM (
+          'active', 'expired', 'revoked'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS "creator_tier_enum" AS ENUM (
-        'indie', 'verified', 'label'
-      )
+      DO $$ BEGIN
+        CREATE TYPE "creator_tier_enum" AS ENUM (
+          'indie', 'verified', 'label'
+        );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `);
 
-    // ── creator_profiles ───────────────────────────────────────────────────
+    // â”€â”€ creator_profiles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS "creator_profiles" (
         "id"                      UUID          NOT NULL DEFAULT gen_random_uuid(),
@@ -72,7 +87,7 @@ export class EPlayModule1700002700000 implements MigrationInterface {
     await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_creator_profiles_tier"    ON "creator_profiles" ("tier")`);
     await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_creator_profiles_active"  ON "creator_profiles" ("is_active")`);
 
-    // ── digital_assets ─────────────────────────────────────────────────────
+    // â”€â”€ digital_assets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS "digital_assets" (
         "id"                   UUID                           NOT NULL DEFAULT gen_random_uuid(),
@@ -104,7 +119,7 @@ export class EPlayModule1700002700000 implements MigrationInterface {
     await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_digital_assets_status"   ON "digital_assets" ("status")`);
     await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_digital_assets_title"    ON "digital_assets" ("title")`);
 
-    // ── eplay_licenses ─────────────────────────────────────────────────────
+    // â”€â”€ eplay_licenses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS "eplay_licenses" (
         "id"                    UUID                  NOT NULL DEFAULT gen_random_uuid(),
