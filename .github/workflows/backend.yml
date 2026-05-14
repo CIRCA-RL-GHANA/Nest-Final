@@ -268,6 +268,37 @@ jobs:
               docker rm -f "$c" 2>/dev/null || true
             done
 
+            # ── Free host ports 80/443 for the dockerized nginx ──────────────
+            # The VPS ships with a host-level nginx (Ubuntu) on port 80 that
+            # blocks our promptgenie-nginx container from binding. The
+            # dockerized nginx is the production reverse proxy (handles SSL
+            # via certbot), so the host service must be disabled.
+            if systemctl is-active --quiet nginx 2>/dev/null; then
+              echo "[bootstrap] Stopping host-level nginx (conflicts with dockerized nginx on :80/:443)"
+              systemctl stop nginx || true
+              systemctl disable nginx || true
+            fi
+            if systemctl is-active --quiet apache2 2>/dev/null; then
+              echo "[bootstrap] Stopping host-level apache2 (conflicts with dockerized nginx on :80/:443)"
+              systemctl stop apache2 || true
+              systemctl disable apache2 || true
+            fi
+            # Belt-and-suspenders: kill any straggler bound to 80/443 that
+            # isn't a docker-proxy process (those are managed by our compose).
+            for port in 80 443; do
+              pids=$(ss -ltnp 2>/dev/null \
+                       | awk -v p=":$port" '$4 ~ p { gsub(/.*pid=/,"",$NF); gsub(/,.*/,"",$NF); print $NF }' \
+                       | sort -u)
+              for pid in $pids; do
+                pname=$(ps -p "$pid" -o comm= 2>/dev/null || echo "")
+                case "$pname" in
+                  docker-proxy|containerd*|dockerd) ;; # ours — leave alone
+                  "") ;;
+                  *) echo "[bootstrap] Killing process holding :$port — pid=$pid name=$pname"; kill -9 "$pid" 2>/dev/null || true ;;
+                esac
+              done
+            done
+
             # ── One-shot DB reset: prior aborted runs left postgres/redis
             # volumes tagged with the wrong project label and credentials that
             # no longer match the current .env. Wipe them on the first
