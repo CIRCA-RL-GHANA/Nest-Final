@@ -21,6 +21,25 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.prod.yml"
 COMPOSE="docker compose -f $COMPOSE_FILE"
 
+# Dump full diagnostics on any exit-with-error
+on_error() {
+  local rc=$?
+  echo ""
+  echo "============================================================"
+  echo "[TRAP] deploy.sh exiting with code $rc — dumping diagnostics"
+  echo "============================================================"
+  echo "===== compose ps ====="
+  $COMPOSE ps 2>&1 || true
+  echo "===== promptgenie-app compose logs (last 250) ====="
+  $COMPOSE logs --tail=250 --no-color app 2>&1 || true
+  echo "===== promptgenie-app docker logs (last 250) ====="
+  docker logs --tail=250 promptgenie-app 2>&1 || true
+  echo "===== promptgenie-app inspect state ====="
+  docker inspect promptgenie-app --format '{{json .State}}' 2>&1 || true
+  exit $rc
+}
+trap on_error ERR
+
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 log()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
 ok()   { echo -e "${GREEN}[OK]${NC}    $*"; }
@@ -113,7 +132,18 @@ deploy() {
   ok "Migrations applied"
 
   log "Starting all services..."
-  $COMPOSE up -d --remove-orphans
+  if ! $COMPOSE up -d --remove-orphans; then
+    warn "compose up failed — dumping diagnostic logs"
+    echo "===== promptgenie-app logs (last 200) ====="
+    $COMPOSE logs --tail=200 --no-color app || true
+    echo "===== promptgenie-app docker logs (last 200) ====="
+    docker logs --tail=200 promptgenie-app 2>&1 || true
+    echo "===== container ps ====="
+    $COMPOSE ps || true
+    echo "===== container inspect (state) ====="
+    docker inspect promptgenie-app --format '{{json .State}}' 2>&1 || true
+    die "compose up -d --remove-orphans failed (see logs above)"
+  fi
 
   wait_for_app_healthy
 }
