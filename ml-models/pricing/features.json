@@ -1,4 +1,4 @@
-﻿{
+{
     "output":  "surge_norm [0-1]",
     "inputs":  [
                    "demand_factor_norm",

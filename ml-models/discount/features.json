@@ -1,4 +1,4 @@
-﻿{
+{
     "output":  "discount_norm [0-1]",
     "inputs":  [
                    "current_price_norm",

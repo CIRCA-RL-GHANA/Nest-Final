@@ -1,4 +1,4 @@
-﻿{
+{
     "features":  [
                      "buy_score — normalised keyword match for buy/purchase/order intents [0-1]",
                      "sell_score — normalised keyword match for sell/list/upload intents [0-1]",

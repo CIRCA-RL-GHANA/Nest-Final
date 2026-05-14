@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 'use strict';
 /**
  * PROMPT Genie — ML Model Training Script (Node.js / tfjs-node)

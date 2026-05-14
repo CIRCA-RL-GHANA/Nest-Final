@@ -1,4 +1,4 @@
-﻿{
+{
     "features":  [
                      "months_subscribed_norm — months_subscribed / 24  (capped 0-1)",
                      "days_since_login_norm — days_since_login / 30  (capped 0-1)",
