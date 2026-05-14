@@ -163,7 +163,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
-          command_timeout: 15m
+          command_timeout: 30m
           envs: API_DOMAIN,FRONTEND_DOMAIN,SENDGRID_API_KEY,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,AI_API_KEY
           script: |
             set -euo pipefail
