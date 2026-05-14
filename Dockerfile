@@ -1,9 +1,13 @@
 # Multi-stage build for production
-FROM node:18-alpine AS builder
+# Debian (glibc) base — @tensorflow/tfjs-node ships pre-built native binaries
+# for linux-x64 (glibc) only; musl/Alpine is not supported upstream.
+FROM node:18-bookworm-slim AS builder
 
-# libc6-compat: required for @tensorflow/tfjs-node native binary (glibc shim on Alpine/musl)
-# python3 + make + g++ + git: required for node-gyp compilation of native modules (bcrypt, etc.)
-RUN apk add --no-cache libc6-compat python3 make g++ git
+# python3 + build-essential + git: required for node-gyp compilation of native
+# modules (bcrypt, @tensorflow/tfjs-node, etc.)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 build-essential git ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -27,17 +31,21 @@ RUN npm run build
 # Train & export all 5 TF.js models (fraud, pricing, recommendations, discount, churn).
 # Runs inside the builder stage where @tensorflow/tfjs-node native binary is
 # already compiled.  Output files are written back to ./ml-models/.
-RUN node ml-models/train-models.js
+# Fails soft: if training cannot run for any reason, the pre-committed model
+# artifacts already copied above are used at runtime.
+RUN node ml-models/train-models.js || echo "[WARN] ML training skipped - using pre-committed models"
 
 # Prune dev dependencies so the production stage can copy node_modules directly,
 # preserving pre-compiled native binaries (bcrypt, @tensorflow/tfjs-node).
 RUN npm prune --production
 
 # Production stage
-FROM node:18-alpine AS production
+FROM node:18-bookworm-slim AS production
 
-# libc6-compat: required for @tensorflow/tfjs-node native binary on Alpine/musl
-RUN apk add --no-cache libc6-compat
+# Runtime libs for native modules + tini for proper signal handling
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tini wget \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -59,8 +67,8 @@ COPY --from=builder /app/dist ./dist
 # Copy trained ML models from builder (trained during image build)
 COPY --from=builder /app/ml-models ./ml-models
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && adduser -S nestjs -u 1001
+# Create non-root user (Debian syntax)
+RUN groupadd -g 1001 nodejs && useradd -m -u 1001 -g nodejs nestjs
 
 # Create necessary directories (logs + uploads); ml-models already copied from builder
 RUN mkdir -p logs uploads && chown -R nestjs:nodejs /app
