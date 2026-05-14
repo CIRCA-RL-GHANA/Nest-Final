@@ -235,9 +235,9 @@ jobs:
             CORS_ORIGIN=https://${FRONTEND_DOMAIN},https://www.${FRONTEND_DOMAIN}
             CORS_CREDENTIALS=true
 
-            # Payment Facilitator (configure later)
-            PAYMENT_FACILITATOR_PROVIDER=stripe
-            PAYMENT_FACILITATOR_SECRET_KEY=sk_live_NOT_CONFIGURED
+            # Payment Facilitator (configure later; provider must be one of: mock|flutterwave|paystack per Joi schema)
+            PAYMENT_FACILITATOR_PROVIDER=mock
+            PAYMENT_FACILITATOR_SECRET_KEY=mock_key
             PAYMENT_FACILITATOR_WEBHOOK_SECRET=${WEBHOOK_SECRET}
             PAYMENT_FACILITATOR_CURRENCY=USD
 
