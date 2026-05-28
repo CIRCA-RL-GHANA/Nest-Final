@@ -12,12 +12,13 @@ export const validationSchema = Joi.object({
   API_DOMAIN: Joi.string().hostname().default('api.genieinprompt.app'),
   FRONTEND_DOMAIN: Joi.string().hostname().default('app.genieinprompt.app'),
 
-  // Database
-  DB_HOST: Joi.string().required(),
+  // Database — either DATABASE_URL or individual vars
+  DATABASE_URL: Joi.string().uri().allow(''),
+  DB_HOST: Joi.string().default('localhost'),
   DB_PORT: Joi.number().default(5432),
-  DB_USERNAME: Joi.string().required(),
-  DB_PASSWORD: Joi.string().required(),
-  DB_NAME: Joi.string().required(),
+  DB_USERNAME: Joi.string().default('postgres'),
+  DB_PASSWORD: Joi.string().allow('').default(''),
+  DB_NAME: Joi.string().default('promptgenie'),
   DB_SYNCHRONIZE: Joi.boolean().default(false),
   DB_LOGGING: Joi.boolean().default(false),
   DB_SSL: Joi.boolean().default(false),
@@ -33,10 +34,12 @@ export const validationSchema = Joi.object({
   OTP_EXPIRY_MINUTES: Joi.number().default(5),
   PIN_ENCRYPTION_KEY: Joi.string().required(),
 
-  // Redis
+  // Redis — either REDIS_URL or individual vars
+  REDIS_URL: Joi.string().allow(''),
   REDIS_HOST: Joi.string().default('localhost'),
   REDIS_PORT: Joi.number().default(6379),
   REDIS_PASSWORD: Joi.string().allow(''),
+  REDIS_TLS: Joi.boolean().default(false),
   REDIS_DB: Joi.number().default(0),
 
   // Email - SendGrid
@@ -84,7 +87,7 @@ export const validationSchema = Joi.object({
   AI_SURGE_MAX_MULTIPLIER: Joi.number().default(3.5),
   AI_PLATFORM_FEE_PCT: Joi.number().default(8),
   ML_MODEL_PATH: Joi.string().default('./ml-models'),
-  ML_MODEL_SIGNING_SECRET: Joi.string().min(32).required(),
+  ML_MODEL_SIGNING_SECRET: Joi.string().min(32).allow('').default(''),
   FEATURE_STORE_UPDATE_INTERVAL: Joi.number().default(300000),
 
   // Google Maps
