@@ -39,13 +39,27 @@ export const configuration = () => ({
     pinEncryptionKey: process.env.PIN_ENCRYPTION_KEY,
   },
 
-  // Redis
-  redis: {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379', 10),
-    password: process.env.REDIS_PASSWORD,
-    db: parseInt(process.env.REDIS_DB || '0', 10),
-  },
+  // Redis — prefer REDIS_URL (Upstash / Railway), fall back to individual vars
+  redis: (() => {
+    const url = process.env.REDIS_URL;
+    if (url) {
+      const parsed = new URL(url);
+      return {
+        host: parsed.hostname,
+        port: parseInt(parsed.port, 10),
+        password: parsed.password || undefined,
+        db: parseInt(parsed.pathname.slice(1) || '0', 10),
+        tls: parsed.protocol === 'rediss:',
+      };
+    }
+    return {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      password: process.env.REDIS_PASSWORD,
+      db: parseInt(process.env.REDIS_DB || '0', 10),
+      tls: process.env.REDIS_TLS === 'true',
+    };
+  })(),
 
   // Email - SendGrid
   email: {
