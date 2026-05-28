@@ -105,11 +105,19 @@ export class FacilitatorBalanceService {
       const password = this.config.get<string>('redis.password');
       const db = this.config.get<number>('redis.db') ?? 0;
 
-      const client = createClient({
-        socket: { host, port, connectTimeout: 3000 },
-        password: password || undefined,
-        database: db,
-      });
+      const redisUrl = process.env.REDIS_URL;
+      const client = redisUrl
+        ? createClient({ url: redisUrl, socket: { connectTimeout: 3000 } })
+        : createClient({
+            socket: {
+              host,
+              port,
+              tls: this.config.get<boolean>('redis.tls') ?? false,
+              connectTimeout: 3000,
+            },
+            password: password || undefined,
+            database: db,
+          });
 
       client.on('error', (err: Error) =>
         this.logger.warn(`Redis error: ${err.message}`),

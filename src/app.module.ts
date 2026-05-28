@@ -98,6 +98,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
           port: configService.get<number>('redis.port'),
           password: configService.get<string>('redis.password') || undefined,
           db: configService.get<number>('redis.db'),
+          tls: configService.get<boolean>('redis.tls') ? {} : undefined,
         },
       }),
     }),
