@@ -44,6 +44,14 @@ export class PlacesController {
     });
   }
 
+  @Get('autocomplete')
+  @ApiOperation({ summary: 'Address autocomplete suggestions (Google Maps)' })
+  @ApiQuery({ name: 'input', required: true })
+  @ApiResponse({ status: 200, description: 'Autocomplete suggestions' })
+  async autocomplete(@Query('input') input: string) {
+    return this.placesService.autocomplete(input);
+  }
+
   @Get('search')
   @ApiOperation({ summary: 'Search places by name, location, or category' })
   @ApiQuery({ name: 'q', required: true })

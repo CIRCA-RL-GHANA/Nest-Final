@@ -1,13 +1,8 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { AINlpService } from '../../ai/services/ai-nlp.service';
-import {
-  S3Client,
-  PutObjectCommand,
-  DeleteObjectCommand,
-  GetObjectCommand,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import { v4 as uuidv4 } from 'uuid';
+import { Readable } from 'stream';
 
 export interface FileUploadResponse {
   fileId: string;
@@ -20,22 +15,19 @@ export interface FileUploadResponse {
 
 @Injectable()
 export class FileService {
-  private s3: S3Client;
-  private bucket = process.env.AWS_S3_BUCKET || 'promptgenie-files';
   private readonly logger = new Logger(FileService.name);
 
   constructor(private readonly aiNlp: AINlpService) {
-    this.s3 = new S3Client({
-      region: process.env.AWS_REGION || 'us-east-1',
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'test',
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test',
-      },
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
+      secure: true,
     });
   }
 
   /**
-   * Upload file to S3
+   * Upload file to Cloudinary
    */
   async uploadFile(
     file: Express.Multer.File,
@@ -44,31 +36,22 @@ export class FileService {
   ): Promise<FileUploadResponse> {
     this.validateFile(file, folder);
 
-    const fileKey = `${folder}/${userId}/${Date.now()}-${uuidv4()}`;
+    const publicId = `${folder}/${userId}/${Date.now()}-${uuidv4()}`;
 
     try {
-      const command = new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: fileKey,
-        Body: file.buffer,
-        ContentType: file.mimetype,
-        Metadata: {
-          'original-filename': file.originalname,
-          'uploaded-by': userId,
-        },
-        ACL: 'private',
+      const result = await this.uploadStream(file.buffer, {
+        public_id: publicId,
+        folder: `promptgenie/${folder}`,
+        resource_type: 'auto',
+        type: 'authenticated',
       });
 
-      await this.s3.send(command);
-
-      const url = await this.getSignedUrl(fileKey);
-
-      this.logger.log(`File uploaded: ${fileKey}`);
+      this.logger.log(`File uploaded: ${result.public_id}`);
 
       return {
         fileId: uuidv4(),
-        key: fileKey,
-        url,
+        key: result.public_id,
+        url: result.secure_url,
         size: file.size,
         type: file.mimetype,
         uploadedAt: new Date(),
@@ -80,16 +63,14 @@ export class FileService {
   }
 
   /**
-   * Get pre-signed URL for public access
+   * Generate a signed URL for private file access (1 hour expiry)
    */
   async getSignedUrl(fileKey: string, expiresIn = 3600): Promise<string> {
     try {
-      const command = new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: fileKey,
+      return cloudinary.utils.private_download_url(fileKey, '', {
+        expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+        attachment: false,
       });
-
-      return await getSignedUrl(this.s3, command, { expiresIn });
     } catch (error) {
       this.logger.error(`Failed to generate signed URL: ${error.message}`);
       throw new BadRequestException('Failed to generate download URL');
@@ -97,16 +78,11 @@ export class FileService {
   }
 
   /**
-   * Delete file from S3
+   * Delete file from Cloudinary
    */
   async deleteFile(fileKey: string): Promise<void> {
     try {
-      const command = new DeleteObjectCommand({
-        Bucket: this.bucket,
-        Key: fileKey,
-      });
-
-      await this.s3.send(command);
+      await cloudinary.uploader.destroy(fileKey, { resource_type: 'auto', invalidate: true });
       this.logger.log(`File deleted: ${fileKey}`);
     } catch (error) {
       this.logger.error(`Delete failed: ${error.message}`);
@@ -115,8 +91,45 @@ export class FileService {
   }
 
   /**
-   * Validate file type and size
+   * Get file metadata from the public_id path convention: promptgenie/{folder}/{userId}/{timestamp}-{uuid}
    */
+  async getFileMetadata(fileKey: string): Promise<{ userId: string; key: string }> {
+    const parts = fileKey.split('/');
+    // format: promptgenie / folder / userId / filename
+    const userId = parts.length >= 3 ? parts[parts.length - 2] : '';
+    return { userId, key: fileKey };
+  }
+
+  /**
+   * AI: Classify a filename to suggest the best storage folder.
+   */
+  async classifyFileAI(filename: string): Promise<{ folder: string; keywords: string[] }> {
+    try {
+      const kw = await this.aiNlp.extractKeywords(filename);
+      const lower = filename.toLowerCase();
+      let folder = 'attachments';
+      if (/avatar|profile|photo|picture/.test(lower)) folder = 'avatars';
+      else if (/receipt|invoice|payment|bill/.test(lower)) folder = 'receipts';
+      else if (/doc|contract|agreement|report|pdf/.test(lower)) folder = 'documents';
+      return { folder, keywords: kw };
+    } catch {
+      return { folder: 'attachments', keywords: [] };
+    }
+  }
+
+  private uploadStream(
+    buffer: Buffer,
+    options: Record<string, unknown>,
+  ): Promise<UploadApiResponse> {
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(options, (error, result) => {
+        if (error) return reject(error);
+        resolve(result!);
+      });
+      Readable.from(buffer).pipe(uploadStream);
+    });
+  }
+
   private validateFile(file: Express.Multer.File, folder: string): void {
     const allowedTypes: Record<string, string[]> = {
       avatars: ['image/jpeg', 'image/png', 'image/webp'],
@@ -145,39 +158,8 @@ export class FileService {
 
   private isAllowedType(mimeType: string, allowed: string[]): boolean {
     return allowed.some((type) => {
-      if (type.endsWith('/*')) {
-        return mimeType.startsWith(type.slice(0, -2));
-      }
+      if (type.endsWith('/*')) return mimeType.startsWith(type.slice(0, -2));
       return mimeType === type;
     });
-  }
-
-  /**
-   * Get file metadata (minimal stub — returns key and a placeholder userId for ownership check).
-   * Extend this when a FileMetadata entity is added to the DB.
-   */
-  async getFileMetadata(fileKey: string): Promise<{ userId: string; key: string }> {
-    // The fileKey format is `{folder}/{userId}/{timestamp}-{uuid}`
-    // Extract userId from the second path segment
-    const parts = fileKey.split('/');
-    return { userId: parts[1] ?? '', key: fileKey };
-  }
-
-  /**
-   * AI: Classify a filename using NLP to suggest the best storage folder.
-   * Returns folder name: 'documents', 'receipts', 'avatars', or 'attachments'.
-   */
-  async classifyFileAI(filename: string): Promise<{ folder: string; keywords: string[] }> {
-    try {
-      const kw = await this.aiNlp.extractKeywords(filename);
-      const lower = filename.toLowerCase();
-      let folder = 'attachments';
-      if (/avatar|profile|photo|picture/.test(lower)) folder = 'avatars';
-      else if (/receipt|invoice|payment|bill/.test(lower)) folder = 'receipts';
-      else if (/doc|contract|agreement|report|pdf/.test(lower)) folder = 'documents';
-      return { folder, keywords: kw };
-    } catch {
-      return { folder: 'attachments', keywords: [] };
-    }
   }
 }

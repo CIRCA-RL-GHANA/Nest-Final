@@ -10,6 +10,7 @@ import { WaitTimeTracking } from './entities/wait-time-tracking.entity';
 import { RideSOSAlert } from './entities/ride-sos-alert.entity';
 import { QPointsModule } from '../qpoints/qpoints.module';
 import { AIModule } from '../ai/ai.module';
+import { GoogleMapsModule } from '../google-maps/google-maps.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { AIModule } from '../ai/ai.module';
     ]),
     QPointsModule,
     AIModule,
+    GoogleMapsModule,
   ],
   controllers: [RidesController],
   providers: [RidesService],

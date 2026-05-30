@@ -11,6 +11,7 @@ import { CreatePlaceDto } from './dto/create-place.dto';
 import { UpdatePlaceDto } from './dto/update-place.dto';
 import { Place, PlaceVisibility } from './entities/place.entity';
 import { AISearchService } from '../ai/services/ai-search.service';
+import { GoogleMapsService } from '../google-maps/google-maps.service';
 
 @Injectable()
 export class PlacesService {
@@ -20,6 +21,7 @@ export class PlacesService {
     @InjectRepository(Place)
     private readonly placeRepository: Repository<Place>,
     private readonly aiSearch: AISearchService,
+    private readonly googleMaps: GoogleMapsService,
   ) {}
 
   /**
@@ -36,9 +38,19 @@ export class PlacesService {
       throw new ConflictException('Place with this ID already exists');
     }
 
+    // Auto-geocode if coordinates not provided but a location string is
+    let coordinates = dto.coordinates ?? null;
+    if (!coordinates && dto.location) {
+      const geocoded = await this.googleMaps.geocodeAddress(dto.location);
+      if (geocoded) {
+        coordinates = { latitude: geocoded.lat, longitude: geocoded.lng };
+      }
+    }
+
     const place = this.placeRepository.create({
       ...dto,
       ownerId,
+      coordinates,
       visibility: dto.visibility || PlaceVisibility.PRIVATE,
     });
 
@@ -258,6 +270,13 @@ export class PlacesService {
       where: { category, visibility: PlaceVisibility.PUBLIC },
       order: { rating: 'DESC' },
     });
+  }
+
+  /**
+   * Address autocomplete suggestions via Google Maps Places API
+   */
+  async autocomplete(input: string): Promise<{ description: string; placeId: string }[]> {
+    return this.googleMaps.autocomplete(input);
   }
 
   /**

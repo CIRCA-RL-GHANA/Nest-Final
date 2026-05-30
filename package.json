@@ -27,8 +27,7 @@
     "seed": "ts-node -r tsconfig-paths/register src/database/seeds/run-seeds.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1024.0",
-    "@aws-sdk/s3-request-presigner": "^3.1024.0",
+    "@googlemaps/google-maps-services-js": "^3.4.2",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/bull": "^10.0.1",
     "@nestjs/common": "^10.3.0",
@@ -45,6 +44,8 @@
     "@nestjs/typeorm": "^10.0.1",
     "@nestjs/websockets": "^10.3.0",
     "@sendgrid/mail": "^8.1.6",
+    "@sentry/nestjs": "^10.55.0",
+    "@sentry/profiling-node": "^10.55.0",
     "@tensorflow/tfjs-node": "^4.17.0",
     "@types/multer": "^2.1.0",
     "axios": "^1.13.2",
@@ -52,6 +53,7 @@
     "bull": "^4.12.2",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "cloudinary": "^2.10.0",
     "compression": "^1.7.4",
     "compromise": "^14.11.0",
     "dotenv": "^16.3.1",
@@ -68,11 +70,11 @@
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.8.1",
     "socket.io": "^4.6.2",
+    "tsconfig-paths": "^4.2.0",
     "twilio": "^4.21.0",
     "typeorm": "^0.3.19",
     "uuid": "^9.0.1",
-    "winston": "^3.11.0",
-    "tsconfig-paths": "^4.2.0"
+    "winston": "^3.11.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",
