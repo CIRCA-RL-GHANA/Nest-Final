@@ -16,6 +16,7 @@ import { QPointsTransactionService } from '../qpoints/qpoints-transaction.servic
 import { QPointAccount } from '../qpoints/entities/qpoint-account.entity';
 import { AIPricingService } from '../ai/services/ai-pricing.service';
 import { AINlpService } from '../ai/services/ai-nlp.service';
+import { GoogleMapsService } from '../google-maps/google-maps.service';
 
 @Injectable()
 export class RidesService {
@@ -39,6 +40,7 @@ export class RidesService {
     private readonly qpointsService: QPointsTransactionService,
     private readonly aiPricing: AIPricingService,
     private readonly aiNlp: AINlpService,
+    private readonly googleMaps: GoogleMapsService,
   ) {}
 
   async createRide(riderId: string, dto: CreateRideDto): Promise<Ride> {
@@ -48,12 +50,10 @@ export class RidesService {
     const riderPIN = String(Math.floor(Math.random() * 900000) + 100000);
     const driverPIN = String(Math.floor(Math.random() * 900000) + 100000);
 
-    // Calculate AI-powered dynamic fare
-    const distance = this.calculateDistance(
-      dto.pickupLocation.lat,
-      dto.pickupLocation.lng,
-      dto.dropoffLocation.lat,
-      dto.dropoffLocation.lng,
+    // Calculate AI-powered dynamic fare using real road distance
+    const { distanceKm: distance } = await this.googleMaps.getDistanceAndDuration(
+      { lat: dto.pickupLocation.lat, lng: dto.pickupLocation.lng },
+      { lat: dto.dropoffLocation.lat, lng: dto.dropoffLocation.lng },
     );
     const aiPrice = this.aiPricing.computeRidePrice(
       {
@@ -157,18 +157,17 @@ export class RidesService {
   async trackRide(rideId: string, location: { lat: number; lng: number }): Promise<RideTracking> {
     const ride = await this.getRide(rideId);
 
-    const distanceToDestination = this.calculateDistance(
-      location.lat,
-      location.lng,
-      ride.dropoffLocation.lat,
-      ride.dropoffLocation.lng,
-    );
+    const { distanceKm: distanceToDestination, durationMinutes: etaMinutes } =
+      await this.googleMaps.getDistanceAndDuration(
+        { lat: location.lat, lng: location.lng },
+        { lat: ride.dropoffLocation.lat, lng: ride.dropoffLocation.lng },
+      );
 
     const tracking = this.trackingRepository.create({
       rideId,
       location,
       distanceToDestination,
-      etaMinutes: Math.ceil(distanceToDestination * 2), // Simplified ETA
+      etaMinutes,
     });
 
     return this.trackingRepository.save(tracking);
@@ -366,21 +365,4 @@ export class RidesService {
     });
   }
 
-  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371; // Earth radius in km
-    const dLat = this.toRad(lat2 - lat1);
-    const dLon = this.toRad(lon2 - lon1);
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(this.toRad(lat1)) *
-        Math.cos(this.toRad(lat2)) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  }
-
-  private toRad(value: number): number {
-    return (value * Math.PI) / 180;
-  }
 }
