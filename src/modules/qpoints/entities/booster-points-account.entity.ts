@@ -5,8 +5,8 @@ import { EntityProfile } from '@modules/entities/entities/entity.entity';
 import { Branch } from '@modules/entities/entities/branch.entity';
 
 @Entity('booster_points_accounts')
-@Index(['entityId'], { unique: true, where: 'entity_id IS NOT NULL' })
-@Index(['branchId'], { unique: true, where: 'branch_id IS NOT NULL' })
+@Index(['entityId'], { unique: true, where: '"entityId" IS NOT NULL' })
+@Index(['branchId'], { unique: true, where: '"branchId" IS NOT NULL' })
 export class BoosterPointsAccount extends BaseEntity {
   @ApiProperty({
     description: 'Entity ID (for entity-level booster points)',
