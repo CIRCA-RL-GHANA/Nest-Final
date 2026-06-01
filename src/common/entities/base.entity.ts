@@ -18,14 +18,14 @@ export abstract class BaseEntity {
     description: 'Timestamp when the record was created',
     example: '2024-01-01T00:00:00.000Z',
   })
-  @CreateDateColumn({ type: 'timestamp with time zone' })
+  @CreateDateColumn({ type: 'timestamp with time zone', name: 'created_at' })
   createdAt: Date;
 
   @ApiProperty({
     description: 'Timestamp when the record was last updated',
     example: '2024-01-01T00:00:00.000Z',
   })
-  @UpdateDateColumn({ type: 'timestamp with time zone' })
+  @UpdateDateColumn({ type: 'timestamp with time zone', name: 'updated_at' })
   updatedAt: Date;
 
   @ApiProperty({
@@ -33,6 +33,6 @@ export abstract class BaseEntity {
     example: null,
     required: false,
   })
-  @DeleteDateColumn({ type: 'timestamp with time zone', nullable: true })
+  @DeleteDateColumn({ type: 'timestamp with time zone', nullable: true, name: 'deleted_at' })
   deletedAt: Date | null;
 }
