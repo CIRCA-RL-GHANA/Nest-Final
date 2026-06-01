@@ -15,13 +15,19 @@ export class FacilitatorTransactions1700004000000 implements MigrationInterface 
   async up(queryRunner: QueryRunner): Promise<void> {
     // ── Enums ─────────────────────────────────────────────────────────────
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS facilitator_transaction_type AS ENUM ('deposit', 'withdraw')
+      DO $$ BEGIN
+        CREATE TYPE facilitator_transaction_type AS ENUM ('deposit', 'withdraw');
+      EXCEPTION WHEN duplicate_object THEN null;
+      END $$;
     `);
 
     await queryRunner.query(`
-      CREATE TYPE IF NOT EXISTS facilitator_transaction_status AS ENUM (
-        'pending', 'processing', 'completed', 'failed', 'cancelled'
-      )
+      DO $$ BEGIN
+        CREATE TYPE facilitator_transaction_status AS ENUM (
+          'pending', 'processing', 'completed', 'failed', 'cancelled'
+        );
+      EXCEPTION WHEN duplicate_object THEN null;
+      END $$;
     `);
 
     // ── facilitator_transactions ──────────────────────────────────────────
