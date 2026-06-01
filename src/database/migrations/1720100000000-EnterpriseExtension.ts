@@ -6,7 +6,7 @@ export class EnterpriseExtension1720100000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     // ─── institution_tier enum ───────────────────────────────────────────────
     await queryRunner.query(`
-      CREATE TYPE institution_tier_enum AS ENUM ('standard', 'premium', 'sovereign')
+      CREATE TYPE IF NOT EXISTS institution_tier_enum AS ENUM ('standard', 'premium', 'sovereign')
     `);
 
     // ─── institution_configs ─────────────────────────────────────────────────
