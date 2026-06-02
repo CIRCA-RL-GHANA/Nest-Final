@@ -6,6 +6,7 @@ import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiNotFoundResponse,
+  ApiBody,
 } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { RegisterUserDto } from './dto/register-user.dto';
@@ -138,6 +139,13 @@ export class UsersController {
   @Post('check-phone')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Check if a phone number exists in the system' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['phoneNumber'],
+      properties: { phoneNumber: { type: 'string', example: '+233545448456' } },
+    },
+  })
   @ApiResponse({
     status: 200,
     description: 'Phone number check result',
@@ -153,6 +161,13 @@ export class UsersController {
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend OTP to phone number' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['phoneNumber'],
+      properties: { phoneNumber: { type: 'string', example: '+233545448456' } },
+    },
+  })
   @ApiResponse({
     status: 200,
     description: 'OTP resent successfully',
