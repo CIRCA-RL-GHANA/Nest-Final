@@ -6,13 +6,14 @@ import {
   Query,
   Body,
   UseGuards,
-  Request,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { User } from '../users/entities/user.entity';
 import { GoService } from './go.service';
 import { GoTransactionCategory, GoTransactionType } from './entities/go-transaction.entity';
 
@@ -37,8 +38,8 @@ export class GoController {
 
   @Get('wallet')
   @ApiOperation({ summary: 'Get wallet summary with total in/out' })
-  async getWalletSummary(@Request() req: any) {
-    return this.goService.getWalletSummary(req.user.id);
+  async getWalletSummary(@CurrentUser() user: User) {
+    return this.goService.getWalletSummary(user.id);
   }
 
   @Get('transactions')
@@ -48,24 +49,27 @@ export class GoController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   async getTransactions(
-    @Request() req: any,
+    @CurrentUser() user: User,
     @Query('type') type?: GoTransactionType,
     @Query('category') category?: GoTransactionCategory,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
   ) {
-    return this.goService.getTransactions(req.user.id, { type, category, limit, offset });
+    return this.goService.getTransactions(user.id, { type, category, limit, offset });
   }
 
   @Get('transactions/:id')
   @ApiOperation({ summary: 'Get a specific transaction' })
-  async getTransaction(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
-    return this.goService.getTransaction(id, req.user.id);
+  async getTransaction(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.goService.getTransaction(id, user.id);
   }
 
   @Post('topup')
   @ApiOperation({ summary: 'Top up wallet balance' })
-  async topUp(@Request() req: any, @Body() dto: TopUpDto) {
-    return this.goService.topUp(req.user.id, dto.amount, dto.description ?? 'Wallet top-up');
+  async topUp(@CurrentUser() user: User, @Body() dto: TopUpDto) {
+    return this.goService.topUp(user.id, dto.amount, dto.description ?? 'Wallet top-up');
   }
 }

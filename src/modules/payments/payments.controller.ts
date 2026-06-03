@@ -6,11 +6,13 @@ import {
   Body,
   Query,
   UseGuards,
-  Request,
   ParseUUIDPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { User } from '../users/entities/user.entity';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto, QpChargeDto } from './dto/create-payment.dto';
 
@@ -23,13 +25,24 @@ export class PaymentsController {
 
   @Post()
   @ApiOperation({ summary: 'Process a payment' })
-  async processPayment(@Body() dto: CreatePaymentDto) {
-    return this.paymentsService.processPayment(dto);
+  async processPayment(
+    @Body() dto: CreatePaymentDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.paymentsService.processPayment({ ...dto, userId: user.id });
   }
 
   @Post(':id/refund')
-  @ApiOperation({ summary: 'Refund a completed payment' })
-  async refundPayment(@Param('id', ParseUUIDPipe) id: string) {
+  @ApiOperation({ summary: 'Refund a completed payment (owner only)' })
+  async refundPayment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    // Ownership check: verify the payment belongs to the requesting user.
+    const payment = await this.paymentsService.getPayment(id);
+    if (payment.userId !== user.id) {
+      throw new ForbiddenException('You can only refund your own payments');
+    }
     return this.paymentsService.refundPayment(id);
   }
 
@@ -38,17 +51,24 @@ export class PaymentsController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   async getPaymentHistory(
-    @Request() req: any,
+    @CurrentUser() user: User,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
   ) {
-    return this.paymentsService.getPaymentHistory(req.user.id, { limit, offset });
+    return this.paymentsService.getPaymentHistory(user.id, { limit, offset });
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a specific payment' })
-  async getPayment(@Param('id', ParseUUIDPipe) id: string) {
-    return this.paymentsService.getPayment(id);
+  @ApiOperation({ summary: 'Get a specific payment (owner only)' })
+  async getPayment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    const payment = await this.paymentsService.getPayment(id);
+    if (payment.userId !== user.id) {
+      throw new ForbiddenException('You can only view your own payments');
+    }
+    return payment;
   }
 
   // ── Pathway 1: Q-Points Charge ─────────────────────────────────────────

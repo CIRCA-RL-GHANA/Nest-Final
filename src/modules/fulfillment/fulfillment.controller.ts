@@ -14,7 +14,7 @@ import {
 @ApiTags('fulfillment')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/fulfillment')
+@Controller('fulfillment')
 export class FulfillmentController {
   constructor(private readonly fulfillmentService: FulfillmentService) {}
 

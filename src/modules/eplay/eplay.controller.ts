@@ -7,13 +7,14 @@ import {
   Query,
   Body,
   UseGuards,
-  Request,
   ParseUUIDPipe,
   ParseIntPipe,
   DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { User } from '../users/entities/user.entity';
 import { EplayService } from './eplay.service';
 import { CreateDigitalAssetDto } from './dto/create-digital-asset.dto';
 import { PurchaseAssetDto } from './dto/purchase-asset.dto';
@@ -31,31 +32,31 @@ export class EplayController {
 
   @Post('creator/open')
   @ApiOperation({ summary: 'Open a creator (digital branch) profile' })
-  openCreatorProfile(@Request() req: any, @Body() dto: CreateCreatorProfileDto) {
-    return this.eplayService.openCreatorProfile(req.user.id, dto);
+  openCreatorProfile(@CurrentUser() user: User, @Body() dto: CreateCreatorProfileDto) {
+    return this.eplayService.openCreatorProfile(user.id, dto);
   }
 
   @Get('creator/me')
   @ApiOperation({ summary: 'Get my creator profile' })
-  getMyCreatorProfile(@Request() req: any) {
-    return this.eplayService.getMyCreatorProfile(req.user.id);
+  getMyCreatorProfile(@CurrentUser() user: User) {
+    return this.eplayService.getMyCreatorProfile(user.id);
   }
 
   // ── Content Management ──────────────────────────────────────────────────
 
   @Post('assets')
   @ApiOperation({ summary: 'Upload a new digital asset (creator only)' })
-  uploadAsset(@Request() req: any, @Body() dto: CreateDigitalAssetDto) {
-    return this.eplayService.uploadAsset(req.user.id, dto);
+  uploadAsset(@CurrentUser() user: User, @Body() dto: CreateDigitalAssetDto) {
+    return this.eplayService.uploadAsset(user.id, dto);
   }
 
   @Patch('assets/:id/publish')
   @ApiOperation({ summary: 'Publish a draft asset (creator only)' })
   publishAsset(
-    @Request() req: any,
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) assetId: string,
   ) {
-    return this.eplayService.publishAsset(req.user.id, assetId);
+    return this.eplayService.publishAsset(user.id, assetId);
   }
 
   // ── Discovery ───────────────────────────────────────────────────────────
@@ -83,8 +84,8 @@ export class EplayController {
 
   @Post('locker/purchase')
   @ApiOperation({ summary: 'Purchase a digital asset — adds to cloud locker' })
-  purchaseAsset(@Request() req: any, @Body() dto: PurchaseAssetDto) {
-    return this.eplayService.purchaseAsset(req.user.id, dto);
+  purchaseAsset(@CurrentUser() user: User, @Body() dto: PurchaseAssetDto) {
+    return this.eplayService.purchaseAsset(user.id, dto);
   }
 
   @Get('locker')
@@ -92,28 +93,28 @@ export class EplayController {
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   getMyLocker(
-    @Request() req: any,
+    @CurrentUser() user: User,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit = 20,
   ) {
-    return this.eplayService.getMyLocker(req.user.id, page, limit);
+    return this.eplayService.getMyLocker(user.id, page, limit);
   }
 
   @Post('locker/:assetId/stream')
   @ApiOperation({ summary: 'Request a short-lived stream token for a licensed asset' })
   streamAsset(
-    @Request() req: any,
+    @CurrentUser() user: User,
     @Param('assetId', ParseUUIDPipe) assetId: string,
   ) {
-    return this.eplayService.streamAsset(req.user.id, assetId);
+    return this.eplayService.streamAsset(user.id, assetId);
   }
 
   @Patch('locker/licenses/:licenseId/pin')
   @ApiOperation({ summary: 'Toggle offline pin on a license' })
   togglePin(
-    @Request() req: any,
+    @CurrentUser() user: User,
     @Param('licenseId', ParseUUIDPipe) licenseId: string,
   ) {
-    return this.eplayService.togglePin(req.user.id, licenseId);
+    return this.eplayService.togglePin(user.id, licenseId);
   }
 }

@@ -22,7 +22,7 @@ import { CreateDepositDto } from './dto/create-deposit.dto';
 @ApiTags('deposits')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/deposits')
+@Controller('deposits')
 export class DepositsController {
   constructor(private readonly depositsService: DepositsService) {}
 

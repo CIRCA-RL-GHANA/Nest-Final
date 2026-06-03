@@ -36,7 +36,7 @@ const ENTERPRISE_WRITE_ROLES = [
 @ApiTags('enterprise')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Controller('api/v1/enterprise')
+@Controller('enterprise')
 export class EnterpriseController {
   constructor(
     private readonly enterpriseService: EnterpriseService,

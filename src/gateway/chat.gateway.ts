@@ -82,7 +82,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         timestamp: new Date(),
       });
     } catch (error) {
-      this.logger.error(`Connection error: ${error.message}`);
+      this.logger.error(`Connection error: ${error instanceof Error ? error.message : String(error)}`);
       client.disconnect();
     }
   }
@@ -155,7 +155,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.debug(`Message: ${message.id} → ${payload.conversationId}`);
     } catch (error) {
       client.emit('error', {
-        message: error.message,
+        message: error instanceof Error ? error.message : String(error),
         code: 'MESSAGE_SEND_ERROR',
       });
     }
@@ -233,7 +233,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         deletedAt: new Date(),
       });
     } catch (error) {
-      client.emit('error', { message: error.message });
+      client.emit('error', { message: error instanceof Error ? error.message : String(error) });
     }
   }
 

@@ -93,6 +93,16 @@ export const validationSchema = Joi.object({
   // Google Maps
   GOOGLE_MAPS_API_KEY: Joi.string().allow(''),
 
+  // Cloudinary (file / image storage)
+  // Allow empty so the app starts without Cloudinary in development;
+  // uploads will fail gracefully when credentials are missing.
+  CLOUDINARY_CLOUD_NAME: Joi.string().allow('').default(''),
+  CLOUDINARY_API_KEY: Joi.string().allow('').default(''),
+  CLOUDINARY_API_SECRET: Joi.string().allow('').default(''),
+
+  // Error Tracking (Sentry)
+  SENTRY_DSN: Joi.string().uri().allow('').default(''),
+
   // Monitoring
   HEALTH_CHECK_TIMEOUT: Joi.number().default(30000),
   METRICS_ENABLED: Joi.boolean().default(true),

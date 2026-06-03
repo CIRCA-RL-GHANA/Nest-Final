@@ -144,6 +144,18 @@ export const configuration = () => ({
     apiKey: process.env.GOOGLE_MAPS_API_KEY,
   },
 
+  // Cloudinary (file / image storage — replaces S3)
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    apiSecret: process.env.CLOUDINARY_API_SECRET,
+  },
+
+  // Error Tracking (Sentry)
+  sentry: {
+    dsn: process.env.SENTRY_DSN,
+  },
+
   // Monitoring
   monitoring: {
     healthCheckTimeout: parseInt(process.env.HEALTH_CHECK_TIMEOUT || '30000', 10),

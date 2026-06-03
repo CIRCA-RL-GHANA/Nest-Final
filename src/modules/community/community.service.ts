@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Community, CommunityStatus, CommunityType, CommunityVisibility } from './entities/community.entity';
 import { CommunityMembership, MemberRole, MemberStatus } from './entities/community-membership.entity';
 import { CommunityPost, PostType } from './entities/community-post.entity';
@@ -87,7 +87,7 @@ export class CommunityService {
     });
     if (!memberships.length) return [];
     const communityIds = memberships.map(m => m.communityId);
-    return this.communityRepo.findByIds(communityIds);
+    return this.communityRepo.find({ where: { id: In(communityIds) } });
   }
 
   // ── Membership ───────────────────────────────────────────────────────────

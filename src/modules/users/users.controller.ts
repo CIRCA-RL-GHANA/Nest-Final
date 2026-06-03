@@ -1,4 +1,6 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Get, Param } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Get, Param, ForbiddenException } from '@nestjs/common';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { User } from './entities/user.entity';
 import {
   ApiTags,
   ApiOperation,
@@ -60,56 +62,58 @@ export class UsersController {
     return this.usersService.verifyOtp(verifyOtpDto);
   }
 
+  // Biometric verify is @Public() because it runs during onboarding before the
+  // user has a JWT. The userId in the body is validated against the OTP state
+  // in the service; a mismatch throws 400.
   @Public()
   @Post('verify-biometric')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Update biometric verification status' })
+  @ApiOperation({ summary: 'Update biometric verification status (onboarding — no auth required)' })
   @ApiResponse({
     status: 200,
     description: 'Biometric verification status updated',
-    schema: {
-      example: {
-        message: 'Biometric verification status updated successfully.',
-      },
-    },
+    schema: { example: { message: 'Biometric verification status updated successfully.' } },
   })
   @ApiBadRequestResponse({ description: 'User not eligible for biometric verification' })
   async verifyBiometric(@Body() verifyBiometricDto: VerifyBiometricDto) {
     return this.usersService.verifyBiometric(verifyBiometricDto);
   }
 
+  // set-pin is @Public() for the same reason as verifyBiometric (onboarding flow).
+  // The service verifies OTP state before writing the PIN.
   @Public()
   @Post('set-pin')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Set PIN for user' })
+  @ApiOperation({ summary: 'Set PIN for user (onboarding — no auth required)' })
   @ApiResponse({
     status: 201,
     description: 'PIN setup successful',
-    schema: {
-      example: {
-        message: 'PIN setup successful.',
-      },
-    },
+    schema: { example: { message: 'PIN setup successful.' } },
   })
   @ApiBadRequestResponse({ description: 'PIN setup failed' })
   async setPin(@Body() setPinDto: SetPinDto) {
     return this.usersService.setPin(setPinDto);
   }
 
+  // Staff assignment requires authentication and the authenticated user must be
+  // the admin performing the action — adminId in the body MUST match req.user.id.
   @Post('staff/assign')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Assign staff role to user' })
+  @ApiOperation({ summary: 'Assign staff role to user (authenticated admin only)' })
   @ApiResponse({
     status: 201,
     description: 'Staff role assigned successfully',
-    schema: {
-      example: {
-        message: 'Staff role assigned successfully.',
-      },
-    },
+    schema: { example: { message: 'Staff role assigned successfully.' } },
   })
   @ApiBadRequestResponse({ description: 'Invalid role or staff assignment failed' })
-  async assignStaffRole(@Body() assignStaffRoleDto: AssignStaffRoleDto) {
+  async assignStaffRole(
+    @Body() assignStaffRoleDto: AssignStaffRoleDto,
+    @CurrentUser() user: User,
+  ) {
+    // Prevent callers from impersonating a different admin.
+    if (assignStaffRoleDto.adminId !== user.id) {
+      throw new ForbiddenException('adminId must match your authenticated user ID');
+    }
     return this.usersService.assignStaffRole(assignStaffRoleDto);
   }
 

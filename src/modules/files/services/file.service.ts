@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AINlpService } from '../../ai/services/ai-nlp.service';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import { v4 as uuidv4 } from 'uuid';
@@ -17,11 +18,14 @@ export interface FileUploadResponse {
 export class FileService {
   private readonly logger = new Logger(FileService.name);
 
-  constructor(private readonly aiNlp: AINlpService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly aiNlp: AINlpService,
+  ) {
     cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key: process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET,
+      cloud_name: this.config.get<string>('cloudinary.cloudName'),
+      api_key: this.config.get<string>('cloudinary.apiKey'),
+      api_secret: this.config.get<string>('cloudinary.apiSecret'),
       secure: true,
     });
   }
@@ -57,8 +61,9 @@ export class FileService {
         uploadedAt: new Date(),
       };
     } catch (error) {
-      this.logger.error(`Upload failed: ${error.message}`);
-      throw new BadRequestException(`Upload failed: ${error.message}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Upload failed: ${msg}`);
+      throw new BadRequestException(`Upload failed: ${msg}`);
     }
   }
 
@@ -72,7 +77,8 @@ export class FileService {
         attachment: false,
       });
     } catch (error) {
-      this.logger.error(`Failed to generate signed URL: ${error.message}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to generate signed URL: ${msg}`);
       throw new BadRequestException('Failed to generate download URL');
     }
   }
@@ -85,13 +91,15 @@ export class FileService {
       await cloudinary.uploader.destroy(fileKey, { resource_type: 'auto', invalidate: true });
       this.logger.log(`File deleted: ${fileKey}`);
     } catch (error) {
-      this.logger.error(`Delete failed: ${error.message}`);
-      throw new BadRequestException(`Delete failed: ${error.message}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Delete failed: ${msg}`);
+      throw new BadRequestException(`Delete failed: ${msg}`);
     }
   }
 
   /**
-   * Get file metadata from the public_id path convention: promptgenie/{folder}/{userId}/{timestamp}-{uuid}
+   * Get file metadata from the public_id path convention:
+   * promptgenie/{folder}/{userId}/{timestamp}-{uuid}
    */
   async getFileMetadata(fileKey: string): Promise<{ userId: string; key: string }> {
     const parts = fileKey.split('/');
@@ -102,16 +110,17 @@ export class FileService {
 
   /**
    * AI: Classify a filename to suggest the best storage folder.
+   * extractKeywords is synchronous — no await needed.
    */
-  async classifyFileAI(filename: string): Promise<{ folder: string; keywords: string[] }> {
+  classifyFileAI(filename: string): { folder: string; keywords: string[] } {
     try {
-      const kw = await this.aiNlp.extractKeywords(filename);
+      const keywords = this.aiNlp.extractKeywords(filename);
       const lower = filename.toLowerCase();
       let folder = 'attachments';
       if (/avatar|profile|photo|picture/.test(lower)) folder = 'avatars';
       else if (/receipt|invoice|payment|bill/.test(lower)) folder = 'receipts';
       else if (/doc|contract|agreement|report|pdf/.test(lower)) folder = 'documents';
-      return { folder, keywords: kw };
+      return { folder, keywords };
     } catch {
       return { folder: 'attachments', keywords: [] };
     }
@@ -122,11 +131,14 @@ export class FileService {
     options: Record<string, unknown>,
   ): Promise<UploadApiResponse> {
     return new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(options, (error, result) => {
-        if (error) return reject(error);
-        resolve(result!);
-      });
-      Readable.from(buffer).pipe(uploadStream);
+      const stream = cloudinary.uploader.upload_stream(
+        options,
+        (error: Error | undefined, result: UploadApiResponse | undefined) => {
+          if (error) return reject(error);
+          resolve(result!);
+        },
+      );
+      Readable.from(buffer).pipe(stream);
     });
   }
 
@@ -145,12 +157,12 @@ export class FileService {
       attachments: 50 * 1024 * 1024,
     };
 
-    const allowed = allowedTypes[folder] || [];
-    if (!this.isAllowedType(file.mimetype, allowed)) {
+    const allowed = allowedTypes[folder] ?? [];
+    if (allowed.length && !this.isAllowedType(file.mimetype, allowed)) {
       throw new BadRequestException(`File type ${file.mimetype} not allowed for ${folder}`);
     }
 
-    const maxSize = maxSizes[folder] || 50 * 1024 * 1024;
+    const maxSize = maxSizes[folder] ?? 50 * 1024 * 1024;
     if (file.size > maxSize) {
       throw new BadRequestException(`File size exceeds ${maxSize / 1024 / 1024}MB limit`);
     }

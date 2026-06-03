@@ -43,7 +43,7 @@ class SubscribeCreditDataDto {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, FiLicenseGuard)
 @Roles(UserRole.FINANCIAL_INSTITUTION, UserRole.FI_LOAN_OFFICER, UserRole.FI_AUDITOR, UserRole.ADMIN)
-@Controller('api/v1/credit-data')
+@Controller('credit-data')
 export class CreditDataController {
   constructor(private readonly creditDataService: CreditDataService) {}
 

@@ -17,14 +17,14 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { FiLicenseGuard } from '../auth/guards/fi-license.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { LoansService } from './loans.service';
 import { ApplyLoanDto, ApproveLoanDto, RepayLoanDto } from './dto/loans.dto';
 
 @ApiTags('loans')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/loans')
+@Controller('loans')
 export class LoansController {
   constructor(private readonly loansService: LoansService) {}
 
@@ -32,13 +32,13 @@ export class LoansController {
   @Post('apply')
   @ApiOperation({ summary: 'User applies for a loan from a specific FI' })
   @HttpCode(HttpStatus.CREATED)
-  async apply(@CurrentUser() user: any, @Body() dto: ApplyLoanDto) {
+  async apply(@CurrentUser() user: User, @Body() dto: ApplyLoanDto) {
     return this.loansService.requestLoan(user.id, dto);
   }
 
   @Get('applications')
   @ApiOperation({ summary: 'Get loan applications for current user or FI entity' })
-  async getApplications(@CurrentUser() user: any) {
+  async getApplications(@CurrentUser() user: User) {
     return this.loansService.getApplications(user.id);
   }
 
@@ -47,7 +47,7 @@ export class LoansController {
   @ApiQuery({ name: 'amount', type: Number })
   @ApiQuery({ name: 'purpose', type: String })
   async getOffers(
-    @CurrentUser() user: any,
+    @CurrentUser() user: User,
     @Query('amount') amount: string,
     @Query('purpose') purpose: string,
   ) {
@@ -63,7 +63,7 @@ export class LoansController {
   @Roles(UserRole.FINANCIAL_INSTITUTION, UserRole.FI_LOAN_OFFICER, UserRole.ADMIN)
   @ApiOperation({ summary: 'FI Loan Officer approves a pending loan application' })
   async approve(
-    @CurrentUser() user: any,
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ApproveLoanDto,
   ) {
@@ -79,7 +79,7 @@ export class LoansController {
   @Roles(UserRole.FINANCIAL_INSTITUTION, UserRole.FI_LOAN_OFFICER, UserRole.ADMIN)
   @ApiOperation({ summary: 'FI Loan Officer rejects a pending loan application' })
   async reject(
-    @CurrentUser() user: any,
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: { notes?: string },
   ) {
@@ -91,7 +91,7 @@ export class LoansController {
   @ApiOperation({ summary: 'Manually repay an active loan' })
   @HttpCode(HttpStatus.OK)
   async repay(
-    @CurrentUser() user: any,
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RepayLoanDto,
   ) {

@@ -15,7 +15,7 @@ import { RegisterChannelDto, SyncChannelDto } from './dto/multi-channel.dto';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ENTERPRISE_ADMIN, UserRole.ENTERPRISE_OPERATOR, UserRole.ADMIN)
-@Controller('api/v1/multi-channel')
+@Controller('multi-channel')
 export class MultiChannelController {
   constructor(private readonly multiChannelService: MultiChannelService) {}
 

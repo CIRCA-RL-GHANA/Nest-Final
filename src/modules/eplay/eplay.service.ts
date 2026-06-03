@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { DigitalAsset, DigitalAssetStatus, DigitalAssetType, AccessModel } from './entities/digital-asset.entity';
 import { EplayLicense, LicenseStatus } from './entities/eplay-license.entity';
 import { CreatorProfile } from './entities/creator-profile.entity';
@@ -123,50 +123,60 @@ export class EplayService {
       throw new ConflictException('You already have an active license for this content.');
     }
 
-    // Deduct from user's fiat wallet (priceQPoints expressed as currency units)
+    // ── Deduct wallet first, then complete remaining steps atomically.
+    // If any post-deduction step fails we reverse the charge so the user
+    // is never debited without receiving a license.
     await this.walletsService.deductBalance(userId, Number(asset.priceQPoints));
 
-    // Calculate royalties
-    const platformCut = Number(asset.priceQPoints) * (this.PLATFORM_ROYALTY_PCT / 100);
-    const creatorCut = Number(asset.priceQPoints) - platformCut;
+    try {
+      const platformCut = Number(asset.priceQPoints) * (this.PLATFORM_ROYALTY_PCT / 100);
+      const creatorCut = Number(asset.priceQPoints) - platformCut;
 
-    // Credit creator earnings counter
-    const creatorProfile = await this.creatorRepo.findOne({ where: { id: asset.creatorProfileId } });
-    if (creatorProfile) {
-      await this.creatorRepo.increment({ id: creatorProfile.id }, 'totalEarningsQPoints', creatorCut);
+      const creatorProfile = await this.creatorRepo.findOne({ where: { id: asset.creatorProfileId } });
+      if (creatorProfile) {
+        await this.creatorRepo.increment({ id: creatorProfile.id }, 'totalEarningsQPoints', creatorCut);
+      }
+
+      const revenueRecord = this.revenueRepo.create({
+        type: RevenueType.TRANSACTION_FEE,
+        amountQPoints: platformCut,
+        entityId: null,
+        userId,
+        refId: asset.id,
+        metadata: { type: 'eplay_royalty', assetId: asset.id, creatorId: asset.creatorProfileId },
+      });
+      await this.revenueRepo.save(revenueRecord);
+
+      await this.assetRepo.increment({ id: asset.id }, 'purchaseCount', 1);
+
+      let expiresAt: Date | null = null;
+      if (asset.accessModel === AccessModel.RENTAL && asset.rentalDurationDays) {
+        expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + asset.rentalDurationDays);
+      }
+
+      const license = this.licenseRepo.create({
+        userId,
+        digitalAssetId: asset.id,
+        amountPaidQPoints: asset.priceQPoints,
+        transactionId: dto.transactionId ?? null,
+        expiresAt,
+        status: LicenseStatus.ACTIVE,
+      });
+      this.logger.log(`License created for user ${userId} on asset ${asset.id}`);
+      return await this.licenseRepo.save(license);
+    } catch (err) {
+      // Reverse the wallet charge so the user isn't left debited without a license.
+      this.logger.error(
+        `purchaseAsset: post-deduction step failed for user ${userId}, reversing charge. Error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      await this.walletsService.addBalance(userId, Number(asset.priceQPoints)).catch((reverseErr) => {
+        this.logger.error(
+          `purchaseAsset: FAILED to reverse charge for user ${userId} — manual intervention required. Error: ${reverseErr instanceof Error ? reverseErr.message : String(reverseErr)}`,
+        );
+      });
+      throw err;
     }
-
-    // Record platform revenue
-    const revenueRecord = this.revenueRepo.create({
-      type: RevenueType.TRANSACTION_FEE,
-      amountQPoints: platformCut,
-      entityId: null,
-      userId,
-      refId: asset.id,
-      metadata: { type: 'eplay_royalty', assetId: asset.id, creatorId: asset.creatorProfileId },
-    });
-    await this.revenueRepo.save(revenueRecord);
-
-    // Track purchase count
-    await this.assetRepo.increment({ id: asset.id }, 'purchaseCount', 1);
-
-    // Compute expiry
-    let expiresAt: Date | null = null;
-    if (asset.accessModel === AccessModel.RENTAL && asset.rentalDurationDays) {
-      expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + asset.rentalDurationDays);
-    }
-
-    const license = this.licenseRepo.create({
-      userId,
-      digitalAssetId: asset.id,
-      amountPaidQPoints: asset.priceQPoints,
-      transactionId: dto.transactionId ?? null,
-      expiresAt,
-      status: LicenseStatus.ACTIVE,
-    });
-    this.logger.log(`License created for user ${userId} on asset ${asset.id}`);
-    return this.licenseRepo.save(license);
   }
 
   async getMyLocker(userId: string, page = 1, limit = 20): Promise<{ items: (EplayLicense & { asset?: DigitalAsset })[]; total: number }> {
@@ -180,7 +190,7 @@ export class EplayService {
     // Attach asset metadata
     const assetIds = licenses.map(l => l.digitalAssetId);
     const assets = assetIds.length
-      ? await this.assetRepo.findByIds(assetIds)
+      ? await this.assetRepo.find({ where: { id: In(assetIds) } })
       : [];
     const assetMap = new Map(assets.map(a => [a.id, a]));
 

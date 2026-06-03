@@ -8,7 +8,6 @@ import {
   Query,
   Body,
   UseGuards,
-  Request,
   ParseUUIDPipe,
   ParseIntPipe,
   DefaultValuePipe,
@@ -19,7 +18,8 @@ import { ApiProperty } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { User, UserRole } from '../users/entities/user.entity';
 import { CommunityService } from './community.service';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -56,36 +56,36 @@ export class CommunityController {
 
   @Get('mine')
   @ApiOperation({ summary: 'Get communities I have joined' })
-  getMyMemberships(@Request() req: any) {
-    return this.communityService.getMyMemberships(req.user.id);
+  getMyMemberships(@CurrentUser() user: User) {
+    return this.communityService.getMyMemberships(user.id);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get community details' })
-  getCommunity(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
-    return this.communityService.getCommunityById(id, req.user.id);
+  getCommunity(@CurrentUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
+    return this.communityService.getCommunityById(id, user.id);
   }
 
   // ── Create ───────────────────────────────────────────────────────────────
 
   @Post()
   @ApiOperation({ summary: 'Create a new community (Library, Playlist, Theater, Fair, Hub, Hangout, or Journal)' })
-  createCommunity(@Request() req: any, @Body() dto: CreateCommunityDto) {
-    return this.communityService.createCommunity(req.user.id, dto);
+  createCommunity(@CurrentUser() user: User, @Body() dto: CreateCommunityDto) {
+    return this.communityService.createCommunity(user.id, dto);
   }
 
   // ── Membership ───────────────────────────────────────────────────────────
 
   @Post(':id/join')
   @ApiOperation({ summary: 'Join a public community' })
-  join(@Request() req: any, @Param('id', ParseUUIDPipe) communityId: string) {
-    return this.communityService.join(req.user.id, communityId);
+  join(@CurrentUser() user: User, @Param('id', ParseUUIDPipe) communityId: string) {
+    return this.communityService.join(user.id, communityId);
   }
 
   @Delete(':id/leave')
   @ApiOperation({ summary: 'Leave a community' })
-  leave(@Request() req: any, @Param('id', ParseUUIDPipe) communityId: string) {
-    return this.communityService.leave(req.user.id, communityId);
+  leave(@CurrentUser() user: User, @Param('id', ParseUUIDPipe) communityId: string) {
+    return this.communityService.leave(user.id, communityId);
   }
 
   @Get(':id/members')
@@ -101,12 +101,12 @@ export class CommunityController {
   @Patch(':id/members/:userId/ban')
   @ApiOperation({ summary: 'Ban a member from the community (admin / moderator only)' })
   banMember(
-    @Request() req: any,
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) communityId: string,
     @Param('userId', ParseUUIDPipe) targetUserId: string,
     @Body() dto: BanMemberDto,
   ) {
-    return this.communityService.banMember(req.user.id, communityId, targetUserId, dto.reason);
+    return this.communityService.banMember(user.id, communityId, targetUserId, dto.reason);
   }
 
   // ── Posts / Feed ─────────────────────────────────────────────────────────
@@ -114,11 +114,11 @@ export class CommunityController {
   @Post(':id/posts')
   @ApiOperation({ summary: 'Create a post in a community' })
   createPost(
-    @Request() req: any,
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) communityId: string,
     @Body() dto: CreatePostDto,
   ) {
-    return this.communityService.createPost(req.user.id, communityId, dto);
+    return this.communityService.createPost(user.id, communityId, dto);
   }
 
   @Get(':id/posts')
@@ -136,11 +136,11 @@ export class CommunityController {
   @Delete(':id/posts/:postId')
   @ApiOperation({ summary: 'Remove a post (moderator action)' })
   removePost(
-    @Request() req: any,
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) communityId: string,
     @Param('postId', ParseUUIDPipe) postId: string,
   ) {
-    return this.communityService.removePost(req.user.id, communityId, postId);
+    return this.communityService.removePost(user.id, communityId, postId);
   }
 
   // ── Enterprise Brand View ────────────────────────────────────────────

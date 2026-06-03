@@ -13,15 +13,19 @@ export interface Response<T> {
 export class TransformInterceptor<T> implements NestInterceptor<T, Response<T>> {
   intercept(context: ExecutionContext, next: CallHandler): Observable<Response<T>> {
     const request = context.switchToHttp().getRequest();
-    const statusCode = context.switchToHttp().getResponse().statusCode;
 
     return next.handle().pipe(
-      map((data) => ({
-        data,
-        statusCode,
-        timestamp: new Date().toISOString(),
-        path: request.url,
-      })),
+      map((data) => {
+        // Read statusCode AFTER the handler completes so that decorators like
+        // @HttpCode(201) have already applied their value to the response object.
+        const statusCode = context.switchToHttp().getResponse().statusCode;
+        return {
+          data,
+          statusCode,
+          timestamp: new Date().toISOString(),
+          path: request.url,
+        };
+      }),
     );
   }
 }

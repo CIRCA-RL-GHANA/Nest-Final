@@ -16,14 +16,14 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { FiLicenseGuard } from '../auth/guards/fi-license.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { InsuranceService } from './insurance.service';
 import { PurchasePolicyDto, FileClaimDto, ReviewClaimDto } from './dto/insurance.dto';
 
 @ApiTags('insurance')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/insurance')
+@Controller('insurance')
 export class InsuranceController {
   constructor(private readonly insuranceService: InsuranceService) {}
 
@@ -31,13 +31,13 @@ export class InsuranceController {
   @Post('policies')
   @ApiOperation({ summary: 'Purchase an insurance policy from a verified FI' })
   @HttpCode(HttpStatus.CREATED)
-  async purchasePolicy(@CurrentUser() user: any, @Body() dto: PurchasePolicyDto) {
+  async purchasePolicy(@CurrentUser() user: User, @Body() dto: PurchasePolicyDto) {
     return this.insuranceService.purchasePolicy(user.id, dto);
   }
 
   @Get('policies')
   @ApiOperation({ summary: 'Get all insurance policies for current user or FI entity' })
-  async getPolicies(@CurrentUser() user: any) {
+  async getPolicies(@CurrentUser() user: User) {
     return this.insuranceService.getPolicies(user.id);
   }
 
@@ -46,7 +46,7 @@ export class InsuranceController {
   @ApiOperation({ summary: 'File an insurance claim against an active policy' })
   @HttpCode(HttpStatus.CREATED)
   async fileClaim(
-    @CurrentUser() user: any,
+    @CurrentUser() user: User,
     @Body() body: { policyId: string } & FileClaimDto,
   ) {
     const { policyId, ...dto } = body;
@@ -55,7 +55,7 @@ export class InsuranceController {
 
   @Get('claims')
   @ApiOperation({ summary: 'Get all claims filed by current user' })
-  async getClaims(@CurrentUser() user: any) {
+  async getClaims(@CurrentUser() user: User) {
     return this.insuranceService.getClaims(user.id);
   }
 
@@ -67,7 +67,7 @@ export class InsuranceController {
   @Roles(UserRole.FINANCIAL_INSTITUTION, UserRole.FI_TELLER, UserRole.ADMIN)
   @ApiOperation({ summary: 'FI Admin approves or rejects a claim, triggering QP payout on approval' })
   async reviewClaim(
-    @CurrentUser() user: any,
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ReviewClaimDto,
   ) {

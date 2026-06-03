@@ -24,7 +24,7 @@ import { CreateSessionDto, SendMessageDto, UpdateSessionContextDto } from './dto
   UserRole.FI_AUDITOR,
   UserRole.ADMIN,
 )
-@Controller('api/v1/concierge')
+@Controller('concierge')
 export class AgenticConciergeController {
   constructor(private readonly conciergeService: AgenticConciergeService) {}
 
