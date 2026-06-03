@@ -6,6 +6,7 @@ import { UpdatePlaceDto } from './dto/update-place.dto';
 import { Place, PlaceVisibility } from './entities/place.entity';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/entities/user.entity';
 
 @ApiTags('Places')
 @Controller('places')
@@ -144,7 +145,7 @@ export class PlacesController {
   // full-update handler above, and there is no need to expose two paths for
   // the same verify action.
   @Patch(':id/verify')
-  @Roles('admin')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Verify a place (admin only)' })
   @ApiResponse({ status: 200, description: 'Place verified', type: Place })
   @ApiResponse({ status: 404, description: 'Place not found' })
