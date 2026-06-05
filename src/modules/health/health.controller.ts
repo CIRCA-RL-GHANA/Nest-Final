@@ -12,7 +12,6 @@ import { MonitoringService } from './monitoring.service';
 
 @ApiTags('health')
 @Controller('health')
-@Public()
 export class HealthController {
   constructor(
     private health: HealthCheckService,
@@ -22,6 +21,9 @@ export class HealthController {
     private readonly monitoring: MonitoringService,
   ) {}
 
+  // Liveness probes are intentionally public — consumed by Docker, nginx, and
+  // load-balancer health checks that do not carry a Bearer token.
+  @Public()
   @Get()
   @HealthCheck()
   @ApiOperation({ summary: 'Check application health' })
@@ -36,6 +38,7 @@ export class HealthController {
     ]);
   }
 
+  @Public()
   @Get('ready')
   @ApiOperation({ summary: 'Check if application is ready' })
   @ApiResponse({ status: 200, description: 'Application is ready' })
@@ -43,6 +46,7 @@ export class HealthController {
     return { status: 'ok', timestamp: new Date().toISOString() };
   }
 
+  @Public()
   @Get('live')
   @ApiOperation({ summary: 'Check if application is alive' })
   @ApiResponse({ status: 200, description: 'Application is alive' })
@@ -51,7 +55,7 @@ export class HealthController {
   }
 
   // ─────────────────────────────────────────────────────
-  // MONITORING ENDPOINTS
+  // MONITORING ENDPOINTS — authenticated (JwtAuthGuard via global APP_GUARD)
   // ─────────────────────────────────────────────────────
 
   @Get('metrics/system')

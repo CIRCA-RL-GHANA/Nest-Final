@@ -95,7 +95,7 @@ export class WalletsService {
       } catch (e) {
         if (e instanceof BadRequestException) throw e;
         // AI check is best-effort — log and proceed on unexpected errors
-        this.logger.error(`AI fraud check error: ${e.message}`);
+        this.logger.error(`AI fraud check error: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
 

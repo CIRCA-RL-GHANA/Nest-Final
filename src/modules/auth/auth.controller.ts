@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Get, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Get, UseGuards, Headers } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -90,7 +90,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Logout (invalidate current session)' })
+  @ApiOperation({ summary: 'Logout (revoke current token)' })
   @ApiResponse({
     status: 200,
     description: 'Logout successful',
@@ -98,8 +98,14 @@ export class AuthController {
       example: { message: 'Logged out successfully' },
     },
   })
-  async logout(@CurrentUser() _user: User) {
-    // In production: blacklist the JWT or remove from session store
+  async logout(
+    @CurrentUser() _user: User,
+    @Headers('authorization') authorization: string,
+  ) {
+    const token = authorization?.replace(/^Bearer\s+/i, '');
+    if (token) {
+      await this.authService.logout(token);
+    }
     return { message: 'Logged out successfully' };
   }
 }

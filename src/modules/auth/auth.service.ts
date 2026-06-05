@@ -3,9 +3,11 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { v4 as uuidv4 } from 'uuid';
 import { User } from '../users/entities/user.entity';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
+import { TokenBlacklistService } from './token-blacklist.service';
 
 export interface AuthTokens {
   accessToken: string;
@@ -35,6 +37,7 @@ export class AuthService {
     private readonly userRepository: Repository<User>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly blacklist: TokenBlacklistService,
   ) {}
 
   async login(loginDto: LoginDto): Promise<LoginResponse> {
@@ -112,8 +115,22 @@ export class AuthService {
 
       return this.generateTokens(user);
     } catch (error) {
-      this.logger.warn(`Token refresh failed: ${error.message}`);
+      this.logger.warn(`Token refresh failed: ${error instanceof Error ? error.message : String(error)}`);
       throw new UnauthorizedException('Invalid or expired refresh token. Please login again.');
+    }
+  }
+
+  async logout(bearerToken: string): Promise<void> {
+    try {
+      const secret = this.configService.get<string>('jwt.secret');
+      const payload = this.jwtService.verify<JwtPayload>(bearerToken, { secret });
+      if (payload.jti) {
+        const now = Math.floor(Date.now() / 1000);
+        const ttl = (payload.exp ?? now + 1) - now;
+        await this.blacklist.blacklist(payload.jti, ttl);
+      }
+    } catch {
+      // Token already expired or malformed — no action needed
     }
   }
 
@@ -124,6 +141,7 @@ export class AuthService {
   private async generateTokens(user: User): Promise<AuthTokens> {
     const payload: JwtPayload = {
       sub: user.id,
+      jti: uuidv4(),
       phoneNumber: user.phoneNumber,
       socialUsername: user.socialUsername,
       wireId: user.wireId,

@@ -5,9 +5,11 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
+import { TokenBlacklistService } from '../token-blacklist.service';
 
 export interface JwtPayload {
   sub: string; // userId
+  jti: string; // unique token ID — used for revocation
   phoneNumber: string;
   socialUsername: string | null;
   wireId: string | null;
@@ -21,6 +23,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     configService: ConfigService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly blacklist: TokenBlacklistService,
   ) {
     const secret = configService.get<string>('jwt.secret');
     if (!secret) {
@@ -34,6 +37,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<User> {
+    if (payload.jti && (await this.blacklist.isBlacklisted(payload.jti))) {
+      throw new UnauthorizedException('Token has been revoked. Please login again.');
+    }
+
     const user = await this.userRepository.findOne({
       where: { id: payload.sub },
     });

@@ -1,6 +1,8 @@
-import { Controller, Get, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { User } from '../users/entities/user.entity';
 import { WalletsService } from './wallets.service';
 
 @ApiTags('wallets')
@@ -12,13 +14,13 @@ export class WalletsController {
 
   @Get('balance')
   @ApiOperation({ summary: 'Get current user wallet balance' })
-  async getBalance(@Request() req: any) {
-    return this.walletsService.getBalance(req.user.id);
+  async getBalance(@CurrentUser() user: User) {
+    return this.walletsService.getBalance(user.id);
   }
 
   @Get('me')
   @ApiOperation({ summary: 'Get current user wallet details' })
-  async getWallet(@Request() req: any) {
-    return this.walletsService.getWallet(req.user.id);
+  async getWallet(@CurrentUser() user: User) {
+    return this.walletsService.getWallet(user.id);
   }
 }

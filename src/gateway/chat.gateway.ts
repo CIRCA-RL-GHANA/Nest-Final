@@ -8,6 +8,7 @@ import {
   WsException,
 } from '@nestjs/websockets';
 import { Logger, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Socket, Namespace } from 'socket.io';
 import { ChatService } from '../modules/social/services/chat.service';
 import { JwtService } from '@nestjs/jwt';
@@ -38,6 +39,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private chatService: ChatService,
     private jwtService: JwtService,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -56,9 +58,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // Validate JWT
-      const payload = this.jwtService.verify(token, {
-        secret: process.env.JWT_SECRET,
-      });
+      const jwtSecret = this.configService.get<string>('jwt.secret');
+      if (!jwtSecret) {
+        this.logger.error('JWT_SECRET is not configured — refusing WebSocket connection');
+        client.disconnect();
+        return;
+      }
+      const payload = this.jwtService.verify(token, { secret: jwtSecret });
 
       const user: SocketUser = {
         id: payload.sub,

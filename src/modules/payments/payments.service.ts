@@ -19,26 +19,26 @@ export class PaymentsService {
     private readonly qpTx: QPointsTransactionService,
   ) {}
 
-  async processPayment(dto: CreatePaymentDto): Promise<Payment> {
+  async processPayment(userId: string, dto: CreatePaymentDto): Promise<Payment> {
     // AI fraud pre-check before processing
     const fraudResult = this.aiFraud.scoreTransaction({
-      userId: dto.userId,
+      userId,
       amount: dto.amount,
       currency: dto.currency ?? 'NGN',
       paymentMethod: dto.paymentMethod,
     });
     if (fraudResult.blocked) {
       this.logger.warn(
-        `Payment blocked by AI fraud check for user ${dto.userId}: ${fraudResult.reason}`,
+        `Payment blocked by AI fraud check for user ${userId}: ${fraudResult.reason}`,
       );
       throw new BadRequestException(`Transaction blocked: ${fraudResult.reason}`);
     }
     if (fraudResult.reviewFlag) {
-      this.logger.warn(`Payment flagged for review (user ${dto.userId}): ${fraudResult.reason}`);
+      this.logger.warn(`Payment flagged for review (user ${userId}): ${fraudResult.reason}`);
     }
 
     const payment = this.paymentRepository.create({
-      userId: dto.userId,
+      userId,
       orderId: dto.orderId ?? null,
       rideId: dto.rideId ?? null,
       amount: dto.amount,
@@ -50,18 +50,19 @@ export class PaymentsService {
     const saved = await this.paymentRepository.save(payment);
 
     try {
-      await this.walletsService.deductBalance(dto.userId, dto.amount);
+      await this.walletsService.deductBalance(userId, dto.amount);
       await this.paymentRepository.update(saved.id, { status: PaymentStatus.COMPLETED });
-      this.logger.log(`Payment ${saved.id} completed for user ${dto.userId}`);
+      this.logger.log(`Payment ${saved.id} completed for user ${userId}`);
 
       return { ...saved, status: PaymentStatus.COMPLETED };
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       await this.paymentRepository.update(saved.id, {
         status: PaymentStatus.FAILED,
-        failureReason: error.message,
+        failureReason: msg,
       });
-      this.logger.error(`Payment ${saved.id} failed: ${error.message}`);
-      throw new BadRequestException(`Payment failed: ${error.message}`);
+      this.logger.error(`Payment ${saved.id} failed: ${msg}`);
+      throw new BadRequestException(`Payment failed: ${msg}`);
     }
   }
 

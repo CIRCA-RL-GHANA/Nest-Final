@@ -29,11 +29,6 @@ export class QpChargeDto {
 }
 
 export class CreatePaymentDto {
-  @ApiProperty({ description: 'User making the payment' })
-  @IsUUID()
-  @IsNotEmpty()
-  userId: string;
-
   @ApiProperty({ description: 'Order ID (if payment is for an order)', required: false })
   @IsUUID()
   @IsOptional()

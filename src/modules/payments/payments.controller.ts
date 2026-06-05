@@ -29,7 +29,7 @@ export class PaymentsController {
     @Body() dto: CreatePaymentDto,
     @CurrentUser() user: User,
   ) {
-    return this.paymentsService.processPayment({ ...dto, userId: user.id });
+    return this.paymentsService.processPayment(user.id, dto);
   }
 
   @Post(':id/refund')
@@ -72,9 +72,17 @@ export class PaymentsController {
   }
 
   // ── Pathway 1: Q-Points Charge ─────────────────────────────────────────
+  // The authenticated user must be the customer authorising the charge.
+  // This prevents any party from draining another user's Q-Points balance.
   @Post('qp/charge')
-  @ApiOperation({ summary: 'Pathway 1 — Charge Q-Points from a customer to a merchant (zero-commission)' })
-  async chargeQp(@Body() dto: QpChargeDto) {
+  @ApiOperation({ summary: 'Pathway 1 — Authorise a Q-Points charge from your account to a merchant (zero-commission)' })
+  async chargeQp(
+    @Body() dto: QpChargeDto,
+    @CurrentUser() user: User,
+  ) {
+    if (dto.customerId !== user.id) {
+      throw new ForbiddenException('customerId must match your authenticated user ID');
+    }
     return this.paymentsService.chargeQp(dto);
   }
 }
