@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
@@ -98,7 +98,7 @@ export class AIService {
     const model = await this.getModel(dto.modelId);
 
     if (model.status !== ModelStatus.ACTIVE) {
-      throw new Error('Model is not active');
+      throw new BadRequestException(`Model ${dto.modelId} is not active (status: ${model.status})`);
     }
 
     const inference = this.inferenceRepository.create({
@@ -111,8 +111,10 @@ export class AIService {
 
     const savedInference = await this.inferenceRepository.save(inference);
 
-    // Process inference asynchronously (simplified)
-    this.processInference(savedInference.id).catch(console.error);
+    // Process inference asynchronously
+    this.processInference(savedInference.id).catch((err: Error) =>
+      this.logger.error(`Background inference ${savedInference.id} failed: ${err.message}`, err.stack),
+    );
 
     return savedInference;
   }
@@ -406,7 +408,9 @@ export class AIService {
     const savedWorkflow = await this.workflowRepository.save(workflow);
 
     // Execute workflow asynchronously
-    this.executeWorkflow(savedWorkflow.id).catch(console.error);
+    this.executeWorkflow(savedWorkflow.id).catch((err: Error) =>
+      this.logger.error(`Background workflow ${savedWorkflow.id} failed: ${err.message}`, err.stack),
+    );
 
     return savedWorkflow;
   }

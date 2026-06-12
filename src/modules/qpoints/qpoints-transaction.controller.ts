@@ -79,19 +79,6 @@ export class QPointsTransactionController {
     return await this.transactionService.getTransactions(query);
   }
 
-  @Post('review-fraud')
-  @ApiOperation({ summary: 'Review a flagged transaction (POST)' })
-  @ApiResponse({ status: 200, description: 'Transaction reviewed', type: QPointTransaction })
-  @ApiResponse({ status: 400, description: 'Invalid request' })
-  @ApiResponse({ status: 404, description: 'Transaction not found' })
-  async postReviewFraud(
-    @Body() reviewDto: ReviewFraudDto,
-    @Req() req: Request,
-  ): Promise<QPointTransaction> {
-    const reviewerId = (req as any).user?.id || 'system';
-    return await this.transactionService.reviewFlaggedTransaction(reviewDto, reviewerId);
-  }
-
   @Put('review-fraud')
   @ApiOperation({ summary: 'Review a flagged transaction' })
   @ApiResponse({ status: 200, description: 'Transaction reviewed', type: QPointTransaction })

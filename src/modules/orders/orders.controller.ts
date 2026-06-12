@@ -1,10 +1,10 @@
-import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -69,8 +69,13 @@ export class OrdersController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   async getUserOrders(
     @Param('userId') userId: string,
+    @CurrentUser() currentUser: User,
     @Query('limit') limit?: number,
   ): Promise<Order[]> {
+    // ISSUE-K: regular users may only view their own orders; elevated roles can view any.
+    if (currentUser.role === UserRole.USER && currentUser.id !== userId) {
+      throw new ForbiddenException('You can only view your own orders');
+    }
     return this.ordersService.getUserOrders(userId, limit);
   }
 

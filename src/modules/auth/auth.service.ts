@@ -1,4 +1,11 @@
-import { Injectable, UnauthorizedException, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  Logger,
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -43,6 +50,14 @@ export class AuthService {
   async login(loginDto: LoginDto): Promise<LoginResponse> {
     const { identifier, password } = loginDto;
 
+    // ISSUE-19: check login lockout before any DB lookup
+    if (await this.blacklist.isLoginLocked(identifier)) {
+      throw new HttpException(
+        'Too many failed login attempts. Please try again in 15 minutes.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     // Find user by phone number OR social username
     const user = await this.userRepository.findOne({
       where: [{ phoneNumber: identifier }, { socialUsername: identifier }],
@@ -54,19 +69,28 @@ export class AuthService {
         'passwordHash',
         'biometricVerified',
         'otpVerified',
+        'role',
+        'isActive',
       ],
     });
 
     if (!user) {
-      this.logger.warn(`Login failed: user not found for identifier=${identifier}`);
+      await this.blacklist.recordLoginFailure(identifier);
+      this.logger.warn(`Login failed: user not found for identifier=***`);
       throw new UnauthorizedException('Invalid credentials. Check your phone number or password.');
     }
 
     // Verify password
     const isPasswordValid = await user.validatePassword(password);
     if (!isPasswordValid) {
+      await this.blacklist.recordLoginFailure(identifier);
       this.logger.warn(`Login failed: wrong password for user=${user.id}`);
       throw new UnauthorizedException('Invalid credentials. Check your phone number or password.');
+    }
+
+    // Check account active status
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account is deactivated. Please contact support.');
     }
 
     // Check OTP verification
@@ -75,6 +99,9 @@ export class AuthService {
         'Phone number not verified. Please complete OTP verification first.',
       );
     }
+
+    // Clear any previous failure count on successful login
+    await this.blacklist.clearLoginFailures(identifier);
 
     // Generate tokens
     const tokens = await this.generateTokens(user);
@@ -105,22 +132,39 @@ export class AuthService {
         secret: refreshSecret,
       });
 
+      // ISSUE-08: reject blacklisted refresh tokens
+      if (payload.jti && (await this.blacklist.isRefreshTokenBlacklisted(payload.jti))) {
+        throw new UnauthorizedException('Refresh token has been revoked. Please login again.');
+      }
+
       const user = await this.userRepository.findOne({
-        where: { id: payload.sub },
+        where: { id: payload.sub, isActive: true },
       });
 
       if (!user) {
         throw new UnauthorizedException('User not found');
       }
 
-      return this.generateTokens(user);
+      const newTokens = await this.generateTokens(user);
+
+      // ISSUE-S: rotate — blacklist the consumed refresh token so it cannot be reused
+      if (payload.jti) {
+        const now = Math.floor(Date.now() / 1000);
+        const remainingTtl = (payload.exp ?? now + 1) - now;
+        if (remainingTtl > 0) {
+          await this.blacklist.blacklistRefreshToken(payload.jti, remainingTtl);
+        }
+      }
+
+      return newTokens;
     } catch (error) {
       this.logger.warn(`Token refresh failed: ${error instanceof Error ? error.message : String(error)}`);
       throw new UnauthorizedException('Invalid or expired refresh token. Please login again.');
     }
   }
 
-  async logout(bearerToken: string): Promise<void> {
+  // ISSUE-08: accepts optional refreshToken to blacklist it alongside the access token
+  async logout(bearerToken: string, refreshToken?: string): Promise<void> {
     try {
       const secret = this.configService.get<string>('jwt.secret');
       const payload = this.jwtService.verify<JwtPayload>(bearerToken, { secret });
@@ -132,10 +176,24 @@ export class AuthService {
     } catch {
       // Token already expired or malformed — no action needed
     }
+
+    if (refreshToken) {
+      try {
+        const refreshSecret = this.configService.get<string>('jwt.refreshSecret');
+        const rPayload = this.jwtService.verify<JwtPayload>(refreshToken, { secret: refreshSecret });
+        if (rPayload.jti) {
+          const now = Math.floor(Date.now() / 1000);
+          const ttl = (rPayload.exp ?? now + 1) - now;
+          await this.blacklist.blacklistRefreshToken(rPayload.jti, ttl);
+        }
+      } catch {
+        // Refresh token already expired or malformed — no action needed
+      }
+    }
   }
 
   async validateUser(userId: string): Promise<User | null> {
-    return this.userRepository.findOne({ where: { id: userId } });
+    return this.userRepository.findOne({ where: { id: userId, isActive: true } });
   }
 
   private async generateTokens(user: User): Promise<AuthTokens> {
@@ -145,6 +203,7 @@ export class AuthService {
       phoneNumber: user.phoneNumber,
       socialUsername: user.socialUsername,
       wireId: user.wireId,
+      role: user.role,
     };
 
     const expiresIn = this.configService.get<string>('jwt.expiresIn') || '7d';

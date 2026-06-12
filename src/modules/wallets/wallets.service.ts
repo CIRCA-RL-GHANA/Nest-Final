@@ -43,6 +43,16 @@ export class WalletsService {
     }
 
     return this.dataSource.transaction(async (manager: EntityManager) => {
+      // ISSUE-24: INSERT ... ON CONFLICT DO NOTHING guarantees the wallet row exists
+      // before we acquire the pessimistic lock — prevents duplicate wallet race.
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(Wallet)
+        .values({ userId, balance: 0, currency: 'NGN', isActive: true })
+        .orIgnore()
+        .execute();
+
       const wallet = await manager
         .getRepository(Wallet)
         .createQueryBuilder('wallet')
@@ -50,18 +60,11 @@ export class WalletsService {
         .setLock('pessimistic_write')
         .getOne();
 
-      if (!wallet) {
-        const created = manager.getRepository(Wallet).create({
-          userId,
-          balance: amount,
-          currency: 'NGN',
-          isActive: true,
-        });
-        return manager.getRepository(Wallet).save(created);
+      if (!wallet!.isActive) {
+        throw new BadRequestException('Wallet is inactive');
       }
-
-      wallet.balance = Number(wallet.balance) + amount;
-      return manager.getRepository(Wallet).save(wallet);
+      wallet!.balance = Number(wallet!.balance) + amount;
+      return manager.getRepository(Wallet).save(wallet!);
     });
   }
 

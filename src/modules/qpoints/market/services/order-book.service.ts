@@ -16,6 +16,8 @@ import { MarketNotificationService } from './market-notification.service';
 import { RevenueService } from '@modules/revenue/revenue.service';
 import { CrossFacilitatorEngineService } from './cross-facilitator-engine.service';
 import { FacilitatorProvider } from './payment-facilitator.service';
+import { User } from '../../../users/entities/user.entity';
+import { TokenBlacklistService } from '../../../auth/token-blacklist.service';
 
 export interface PriceLevel {
   price: number;
@@ -51,33 +53,20 @@ export const FIXED_QP_PRICE = 1.00;
 export class OrderBookService {
   private readonly logger = new Logger(OrderBookService.name);
 
-  /** Section 6.2 – trading suspension flag.  Set via suspendTrading() / resumeTrading(). */
-  private tradingSuspended = false;
-
-  /**
-   * Section 12.2 – set of user IDs whose Q Points trading access has been terminated
-   * by the Company.  Persisted in-memory; for multi-replica production deployments this
-   * should be backed by a DB column (e.g. User.isQpTerminated).
-   */
-  private readonly terminatedUsers = new Set<string>();
-
-  /**
-   * Section 4.3 – set of user IDs suspended due to failure to complete a fiat transfer.
-   * Admin can lift via reinstateUser().  Persisted in-memory; same DB-persistence note as above.
-   */
-  private readonly fiatSuspendedUsers = new Set<string>();
-
   constructor(
     @InjectRepository(QPointOrder)
     private readonly orderRepo: Repository<QPointOrder>,
     @InjectRepository(QPointTrade)
     private readonly tradeRepo: Repository<QPointTrade>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
     private readonly dataSource: DataSource,
     private readonly balance: MarketBalanceService,
     private readonly settlement: SettlementService,
     private readonly notifications: MarketNotificationService,
     private readonly revenue: RevenueService,
     private readonly crossFacilitatorEngine: CrossFacilitatorEngineService,
+    private readonly redisFlags: TokenBlacklistService,
   ) {}
 
   // ========================================================================
@@ -95,23 +84,26 @@ export class OrderBookService {
     quantity: number,
     facilitatorId?: FacilitatorProvider,
   ): Promise<CreateOrderResult> {
-    // Section 6.2 — trading suspension check
-    if (this.tradingSuspended) {
+    // ISSUE-23: Section 6.2 — trading suspension check (Redis-backed, survives restarts/replicas)
+    if (await this.redisFlags.getTradingSuspended()) {
       throw new ServiceUnavailableException(
         'Q Points trading is currently suspended. Per Q Points Terms of Service Section 6.2, ' +
           'the Company may suspend trading at any time without prior notice. ' +
           'During any suspension, you may not place or execute orders. Please try again later.',
       );
     }
-    // Section 12.2 — per-user termination check
-    if (this.terminatedUsers.has(userId)) {
+    // ISSUE-23: Section 12.2 + 4.3 — per-user flags from DB (survives restarts/replicas)
+    const userFlags = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'isQpTerminated', 'isFiatSuspended'] as any,
+    });
+    if (userFlags?.isQpTerminated) {
       throw new ForbiddenException(
         'Your access to the Q Points System has been terminated by the Company per Section 12.2 ' +
           'of the Q Points Terms of Service. Please contact support if you believe this is in error.',
       );
     }
-    // Section 4.3 — fiat-failure suspension check
-    if (this.fiatSuspendedUsers.has(userId)) {
+    if (userFlags?.isFiatSuspended) {
       throw new ForbiddenException(
         'Your Q Points trading privileges have been suspended due to an unresolved fiat settlement ' +
           'failure (Q Points Terms of Service Section 4.3). Please contact support to resolve the ' +
@@ -180,15 +172,16 @@ export class OrderBookService {
       : QPointOrderType.BUY;
 
     // Find the best counter order on a DIFFERENT facilitator
+    // ISSUE-22: use TypeORM property names (camelCase), not raw snake_case column names
     const counterOrder = await this.orderRepo
       .createQueryBuilder('o')
       .where('o.type = :side', { side: oppositeSide })
       .andWhere('o.status = :status', { status: QPointOrderStatus.OPEN })
-      .andWhere('o.user_id != :uid', { uid: order.userId })
-      .andWhere('o.facilitator_id IS NOT NULL')
-      .andWhere('o.facilitator_id != :fid', { fid: userFacilitatorId })
+      .andWhere('o.userId != :uid', { uid: order.userId })
+      .andWhere('o.facilitatorId IS NOT NULL')
+      .andWhere('o.facilitatorId != :fid', { fid: userFacilitatorId })
       .orderBy('o.price', order.type === QPointOrderType.BUY ? 'ASC' : 'DESC')
-      .addOrderBy('o.created_at', 'ASC')
+      .addOrderBy('o.createdAt', 'ASC')
       .getOne();
 
     if (!counterOrder || !counterOrder.facilitatorId) return;
@@ -379,83 +372,67 @@ export class OrderBookService {
   }
 
   // -------------------------------------------------------------------------
-  // Section 6.2 – Trading suspension management
+  // Section 6.2 – Trading suspension management (ISSUE-23: Redis-backed)
   // -------------------------------------------------------------------------
 
-  /** Suspend all order placement.  Callable by admins via the controller. */
-  suspendTrading(): void {
-    this.tradingSuspended = true;
+  async suspendTrading(): Promise<void> {
+    await this.redisFlags.setTradingSuspended(true);
     this.logger.warn('Q Points trading SUSPENDED (Section 6.2)');
   }
 
-  /** Resume order placement after a suspension. */
-  resumeTrading(): void {
-    this.tradingSuspended = false;
+  async resumeTrading(): Promise<void> {
+    await this.redisFlags.setTradingSuspended(false);
     this.logger.log('Q Points trading RESUMED');
   }
 
-  /** Returns true when trading is currently suspended. */
-  isTradingSuspended(): boolean {
-    return this.tradingSuspended;
+  async isTradingSuspended(): Promise<boolean> {
+    return this.redisFlags.getTradingSuspended();
   }
 
   // -------------------------------------------------------------------------
-  // Section 12.2 – Per-user termination management
+  // Section 12.2 – Per-user termination management (ISSUE-23: DB-backed)
   // -------------------------------------------------------------------------
 
-  /**
-   * Terminate a specific user's Q Points trading access.
-   * TOS Section 12.2: "The Company may terminate your access to the Q Points System
-   * at any time, with or without cause, upon notice."
-   */
-  terminateUser(userId: string): void {
-    this.terminatedUsers.add(userId);
+  async terminateUser(userId: string): Promise<void> {
+    await this.userRepo.update(userId, { isQpTerminated: true });
     this.logger.warn(`Q Points access TERMINATED for user ${userId} (Section 12.2)`);
   }
 
-  /**
-   * Reinstate a user's Q Points trading access.
-   * Also lifts any fiat-failure suspension (Section 4.3).
-   */
-  reinstateUser(userId: string): void {
-    this.terminatedUsers.delete(userId);
-    this.fiatSuspendedUsers.delete(userId);
+  async reinstateUser(userId: string): Promise<void> {
+    await this.userRepo.update(userId, { isQpTerminated: false, isFiatSuspended: false });
     this.logger.log(`Q Points access REINSTATED for user ${userId}`);
   }
 
-  /** Returns true if the user's Q Points access has been terminated. */
-  isUserTerminated(userId: string): boolean {
-    return this.terminatedUsers.has(userId);
+  async isUserTerminated(userId: string): Promise<boolean> {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'isQpTerminated'] as any,
+    });
+    return !!user?.isQpTerminated;
   }
 
   // -------------------------------------------------------------------------
-  // Section 4.3 – Fiat-failure trading suspension management
+  // Section 4.3 – Fiat-failure trading suspension management (ISSUE-23: DB-backed)
   // -------------------------------------------------------------------------
 
-  /**
-   * Suspend a user's Q Points trading due to failure to complete a fiat transfer.
-   * TOS Section 4.3: "The Platform may, at its discretion, suspend Q Points trading
-   * privileges if a User fails to complete a fiat transfer or breaches any applicable terms."
-   */
-  suspendUserForFiatFailure(userId: string): void {
-    this.fiatSuspendedUsers.add(userId);
+  async suspendUserForFiatFailure(userId: string): Promise<void> {
+    await this.userRepo.update(userId, { isFiatSuspended: true });
     this.logger.warn(
       `Q Points trading suspended for user ${userId} due to fiat settlement failure (Section 4.3)`,
     );
   }
 
-  /**
-   * Lift a fiat-failure suspension for a specific user.
-   * Called by admin after the settlement issue has been resolved.
-   */
-  liftFiatSuspension(userId: string): void {
-    this.fiatSuspendedUsers.delete(userId);
+  async liftFiatSuspension(userId: string): Promise<void> {
+    await this.userRepo.update(userId, { isFiatSuspended: false });
     this.logger.log(`Fiat suspension lifted for user ${userId} (Section 4.3)`);
   }
 
-  /** Returns true if the user is suspended due to a fiat settlement failure. */
-  isUserFiatSuspended(userId: string): boolean {
-    return this.fiatSuspendedUsers.has(userId);
+  async isUserFiatSuspended(userId: string): Promise<boolean> {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'isFiatSuspended'] as any,
+    });
+    return !!user?.isFiatSuspended;
   }
 
   // ========================================================================
@@ -568,14 +545,8 @@ export class OrderBookService {
       await this.balance.adjustBalance(buyerId, fillQty, `trade_buy_${trade.id}`);
       await this.balance.adjustBalance(sellerId, -fillQty, `trade_sell_${trade.id}`);
 
-      // Cash settlement is async-fire: do not fail the order if settlement
-      // has a transient error – it is retried separately.
-      this.settlement
-        .createSettlement(trade, buyerId, sellerId, cashAmount)
-        .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.error(`Settlement error for trade ${trade.id}: ${msg}`);
-        });
+      // ISSUE-04: await settlement so a failure rolls back the trade transaction
+      await this.settlement.createSettlement(trade, buyerId, sellerId, cashAmount);
 
       // Charge $0.02 trade fee from the taker (the order that was just placed).
       // Fire-and-forget: a fee failure must not reverse the trade.

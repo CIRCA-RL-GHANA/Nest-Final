@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Payment, PaymentStatus } from '../entities/payment.entity';
 import { WalletsService } from '../wallets/wallets.service';
 import { CreatePaymentDto, QpChargeDto } from './dto/create-payment.dto';
@@ -17,11 +17,12 @@ export class PaymentsService {
     private readonly walletsService: WalletsService,
     private readonly aiFraud: AIFraudService,
     private readonly qpTx: QPointsTransactionService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async processPayment(userId: string, dto: CreatePaymentDto): Promise<Payment> {
-    // AI fraud pre-check before processing
-    const fraudResult = this.aiFraud.scoreTransaction({
+    // AI fraud pre-check — use async version so TF-blended score is included
+    const fraudResult = await this.aiFraud.scoreTransactionAsync({
       userId,
       amount: dto.amount,
       currency: dto.currency ?? 'NGN',
@@ -37,54 +38,78 @@ export class PaymentsService {
       this.logger.warn(`Payment flagged for review (user ${userId}): ${fraudResult.reason}`);
     }
 
-    const payment = this.paymentRepository.create({
-      userId,
-      orderId: dto.orderId ?? null,
-      rideId: dto.rideId ?? null,
-      amount: dto.amount,
-      currency: dto.currency ?? 'NGN',
-      paymentMethod: dto.paymentMethod,
-      status: PaymentStatus.PENDING,
-    });
+    // ISSUE-06: use a QueryRunner so the payment record creation and final
+    // status update are atomic — prevents a COMPLETED status without a saved record
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
 
-    const saved = await this.paymentRepository.save(payment);
-
+    let savedId: string;
     try {
-      await this.walletsService.deductBalance(userId, dto.amount);
-      await this.paymentRepository.update(saved.id, { status: PaymentStatus.COMPLETED });
-      this.logger.log(`Payment ${saved.id} completed for user ${userId}`);
+      const payment = qr.manager.create(Payment, {
+        userId,
+        orderId: dto.orderId ?? null,
+        rideId: dto.rideId ?? null,
+        amount: dto.amount,
+        currency: dto.currency ?? 'NGN',
+        paymentMethod: dto.paymentMethod,
+        status: PaymentStatus.PENDING,
+      });
+      const saved = await qr.manager.save(payment);
+      savedId = saved.id;
 
+      await this.walletsService.deductBalance(userId, dto.amount);
+
+      await qr.manager.update(Payment, savedId, { status: PaymentStatus.COMPLETED });
+      await qr.commitTransaction();
+
+      this.logger.log(`Payment ${savedId} completed for user ${userId}`);
       return { ...saved, status: PaymentStatus.COMPLETED };
     } catch (error) {
+      await qr.rollbackTransaction();
       const msg = error instanceof Error ? error.message : String(error);
-      await this.paymentRepository.update(saved.id, {
-        status: PaymentStatus.FAILED,
-        failureReason: msg,
-      });
-      this.logger.error(`Payment ${saved.id} failed: ${msg}`);
+      this.logger.error(`Payment failed for user ${userId}: ${msg}`);
       throw new BadRequestException(`Payment failed: ${msg}`);
+    } finally {
+      await qr.release();
     }
   }
 
   async refundPayment(paymentId: string): Promise<Payment> {
-    const payment = await this.paymentRepository.findOne({ where: { id: paymentId } });
+    // ISSUE-B: use QueryRunner so wallet credit and status update are atomic
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
 
-    if (!payment) {
-      throw new NotFoundException(`Payment ${paymentId} not found`);
+    try {
+      const payment = await qr.manager.findOne(Payment, {
+        where: { id: paymentId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!payment) {
+        throw new NotFoundException(`Payment ${paymentId} not found`);
+      }
+
+      if (payment.status !== PaymentStatus.COMPLETED) {
+        throw new BadRequestException(`Only completed payments can be refunded`);
+      }
+
+      await this.walletsService.addBalance(payment.userId, Number(payment.amount));
+      await qr.manager.update(Payment, paymentId, { status: PaymentStatus.REFUNDED });
+      await qr.commitTransaction();
+
+      this.logger.log(
+        `Payment ${paymentId} refunded — ${payment.amount} returned to user ${payment.userId}`,
+      );
+
+      return { ...payment, status: PaymentStatus.REFUNDED };
+    } catch (err) {
+      await qr.rollbackTransaction();
+      throw err;
+    } finally {
+      await qr.release();
     }
-
-    if (payment.status !== PaymentStatus.COMPLETED) {
-      throw new BadRequestException(`Only completed payments can be refunded`);
-    }
-
-    await this.walletsService.addBalance(payment.userId, Number(payment.amount));
-    await this.paymentRepository.update(paymentId, { status: PaymentStatus.REFUNDED });
-
-    this.logger.log(
-      `Payment ${paymentId} refunded — ${payment.amount} returned to user ${payment.userId}`,
-    );
-
-    return { ...payment, status: PaymentStatus.REFUNDED };
   }
 
   async getPaymentHistory(

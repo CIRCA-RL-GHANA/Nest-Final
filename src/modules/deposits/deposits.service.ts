@@ -5,15 +5,32 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { DepositAccount, DepositStatus } from './entities/deposit-account.entity';
 import { FiProfile } from '../loans/entities/fi-profile.entity';
 import { CreateDepositDto } from './dto/create-deposit.dto';
 import { QPointsTransactionService } from '../qpoints/qpoints-transaction.service';
 
 /** Platform distribution fee on matured deposits: 0.25% p.a. split to AI Treasury. */
-const DISTRIBUTION_FEE_RATE = 0.0025;
-const AI_TREASURY_USER_ID = process.env.AI_TREASURY_USER_ID ?? 'ai-treasury';
+const DISTRIBUTION_FEE_RATE = (() => {
+  const raw = parseFloat(process.env.DEPOSIT_DISTRIBUTION_FEE_RATE ?? '0.0025');
+  if (isNaN(raw) || raw < 0 || raw > 1) {
+    throw new Error(
+      `DEPOSIT_DISTRIBUTION_FEE_RATE must be a number between 0 and 1 (got "${process.env.DEPOSIT_DISTRIBUTION_FEE_RATE}")`,
+    );
+  }
+  return raw;
+})();
+
+const AI_TREASURY_USER_ID = (() => {
+  const id = process.env.AI_TREASURY_USER_ID;
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error(
+      'AI_TREASURY_USER_ID env var is missing or not a valid UUID. Set it to a real treasury account UUID.',
+    );
+  }
+  return id;
+})();
 
 @Injectable()
 export class DepositsService {
@@ -25,6 +42,7 @@ export class DepositsService {
     @InjectRepository(FiProfile)
     private readonly fiProfileRepo: Repository<FiProfile>,
     private readonly qpoints: QPointsTransactionService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // ─── Create Deposit ────────────────────────────────────────────────────────
@@ -46,18 +64,33 @@ export class DepositsService {
       userId,
     );
 
-    const deposit = await this.depositRepo.save(
-      this.depositRepo.create({
-        userId,
-        fiEntityId: dto.fiEntityId,
-        lockedQp: dto.amountQp,
-        interestRate: fiProfile.baseInterestRate,
-        termDays: dto.termDays,
-        maturityDate,
-        status: DepositStatus.ACTIVE,
-        lockTxId: lockTx.id,
-      }),
-    );
+    // ISSUE-05: if deposit record save fails, reverse the QP lock to prevent orphaned balance
+    let deposit: DepositAccount;
+    try {
+      deposit = await this.dataSource.transaction(async (manager) =>
+        manager.getRepository(DepositAccount).save(
+          manager.getRepository(DepositAccount).create({
+            userId,
+            fiEntityId: dto.fiEntityId,
+            lockedQp: dto.amountQp,
+            interestRate: fiProfile.baseInterestRate,
+            termDays: dto.termDays,
+            maturityDate,
+            status: DepositStatus.ACTIVE,
+            lockTxId: lockTx.id,
+          }),
+        ),
+      );
+    } catch (err) {
+      this.logger.error(`Deposit record save failed — reversing QP lock for user ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+      await this.qpoints.transfer(
+        { toUserId: userId, amount: dto.amountQp, description: 'Deposit lock reversal', metadata: { depositType: 'DEPOSIT_LOCK_REVERSAL' } },
+        dto.fiEntityId,
+      ).catch((reverseErr) => {
+        this.logger.error(`CRITICAL: QP lock reversal failed for user ${userId} — manual intervention required: ${reverseErr instanceof Error ? reverseErr.message : String(reverseErr)}`);
+      });
+      throw err;
+    }
 
     this.logger.log(`Deposit ${deposit.id} created: ${dto.amountQp} QP locked for ${dto.termDays} days`);
     return deposit;
@@ -139,7 +172,7 @@ export class DepositsService {
     return this.depositRepo
       .createQueryBuilder('d')
       .where('d.status = :status', { status: DepositStatus.ACTIVE })
-      .andWhere('d.maturity_date <= NOW()')
+      .andWhere('d.maturityDate <= :now', { now: new Date() })
       .getMany();
   }
 

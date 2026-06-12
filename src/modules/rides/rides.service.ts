@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { randomInt, randomBytes, timingSafeEqual } from 'crypto';
 import { Ride, RideStatus } from './entities/ride.entity';
 import { RideTracking } from './entities/ride-tracking.entity';
 import { RideFeedback } from './entities/ride-feedback.entity';
@@ -44,11 +45,12 @@ export class RidesService {
   ) {}
 
   async createRide(riderId: string, dto: CreateRideDto): Promise<Ride> {
-    const rideNumber = `RIDE-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 99999)).padStart(5, '0')}`;
+    // ISSUE-33: CSPRNG for ride number
+    const rideNumber = `RIDE-${new Date().getFullYear()}-${String(randomInt(0, 99999)).padStart(5, '0')}`;
 
-    // Generate PINs for dual verification
-    const riderPIN = String(Math.floor(Math.random() * 900000) + 100000);
-    const driverPIN = String(Math.floor(Math.random() * 900000) + 100000);
+    // Generate PINs for dual verification using CSPRNG
+    const riderPIN = String(randomInt(100000, 1000000));
+    const driverPIN = String(randomInt(100000, 1000000));
 
     // Calculate AI-powered dynamic fare using real road distance
     const { distanceKm: distance } = await this.googleMaps.getDistanceAndDuration(
@@ -133,7 +135,12 @@ export class RidesService {
   async verifyRiderPIN(rideId: string, dto: VerifyPINDto): Promise<{ verified: boolean }> {
     const ride = await this.getRide(rideId);
 
-    if (ride.riderPIN === dto.pin) {
+    // ISSUE-34: timing-safe PIN comparison prevents timing attacks
+    const storedBuf = Buffer.from(ride.riderPIN ?? '');
+    const inputBuf = Buffer.from(dto.pin ?? '');
+    const match =
+      storedBuf.length === inputBuf.length && timingSafeEqual(storedBuf, inputBuf);
+    if (match) {
       ride.riderPINVerified = true;
       await this.rideRepository.save(ride);
       return { verified: true };
@@ -145,7 +152,12 @@ export class RidesService {
   async verifyDriverPIN(rideId: string, dto: VerifyPINDto): Promise<{ verified: boolean }> {
     const ride = await this.getRide(rideId);
 
-    if (ride.driverPIN === dto.pin) {
+    // ISSUE-34: timing-safe PIN comparison prevents timing attacks
+    const storedBuf = Buffer.from(ride.driverPIN ?? '');
+    const inputBuf = Buffer.from(dto.pin ?? '');
+    const match =
+      storedBuf.length === inputBuf.length && timingSafeEqual(storedBuf, inputBuf);
+    if (match) {
       ride.driverPINVerified = true;
       await this.rideRepository.save(ride);
       return { verified: true };
@@ -236,7 +248,8 @@ export class RidesService {
   }
 
   async createReferral(referrerId: string, refereeId: string): Promise<RideReferral> {
-    const referralCode = `REF${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    // ISSUE-33: CSPRNG for referral code
+    const referralCode = `REF${randomBytes(3).toString('hex').toUpperCase()}`;
 
     const referral = this.referralRepository.create({
       referrerId,

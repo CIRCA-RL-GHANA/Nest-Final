@@ -1,6 +1,7 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, FindOptionsWhere } from 'typeorm';
+import * as crypto from 'crypto';
 import { DepositQPointsDto } from './dto/deposit-qpoints.dto';
 import { TransferQPointsDto } from './dto/transfer-qpoints.dto';
 import { WithdrawQPointsDto } from './dto/withdraw-qpoints.dto';
@@ -38,8 +39,11 @@ interface RiskAssessmentResult {
 }
 
 @Injectable()
-export class QPointsTransactionService {
+export class QPointsTransactionService implements OnModuleInit {
   private readonly logger = new Logger(QPointsTransactionService.name);
+
+  // ISSUE-03: cache of accountCode → UUID populated at startup
+  private readonly ledgerAccountIds = new Map<string, string>();
 
   // AML thresholds
   private readonly HIGH_VALUE_THRESHOLD = 5000;
@@ -64,6 +68,27 @@ export class QPointsTransactionService {
     private readonly dataSource: DataSource,
     private readonly aiFraud: AIFraudService,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    // ISSUE-03: pre-warm ledger account code → UUID cache so journal entries use real UUIDs
+    const codes = ['asset-qpoints', 'revenue-deposits', 'expense-withdrawals', 'revenue-fees'];
+    for (const code of codes) {
+      try {
+        const row = await this.generalLedgerRepository.findOne({ where: { accountCode: code } as any });
+        if (row) {
+          this.ledgerAccountIds.set(code, row.id);
+        } else {
+          this.logger.warn(`GeneralLedger row for accountCode="${code}" not found — journal entries will skip this account`);
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to pre-warm ledger account "${code}": ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  private resolveLedgerAccountId(code: string): string | undefined {
+    return this.ledgerAccountIds.get(code);
+  }
 
   /**
    * Resolve a QPointAccount by userId (entity owner lookup).
@@ -756,20 +781,18 @@ export class QPointsTransactionService {
     const entries: Partial<JournalEntry>[] = [];
 
     if (type === TransactionType.DEPOSIT) {
-      // Debit: Q-Points Asset Account
       entries.push({
         transactionId: transaction.id,
-        ledgerAccountId: 'asset-qpoints', // This should be a real ledger account ID
+        ledgerAccountId: this.resolveLedgerAccountId('asset-qpoints'),
         entryType: EntryType.DEBIT,
         amount,
         description: `Deposit to account ${transaction.destinationAccountId}`,
         createdBy: transaction.initiatedBy,
       });
 
-      // Credit: Revenue Account
       entries.push({
         transactionId: transaction.id,
-        ledgerAccountId: 'revenue-deposits',
+        ledgerAccountId: this.resolveLedgerAccountId('revenue-deposits'),
         entryType: EntryType.CREDIT,
         amount,
         description: `Deposit from payment reference ${transaction.metadata?.paymentReference}`,
@@ -809,7 +832,7 @@ export class QPointsTransactionService {
 
         entries.push({
           transactionId: transaction.id,
-          ledgerAccountId: 'revenue-fees',
+          ledgerAccountId: this.resolveLedgerAccountId('revenue-fees'),
           entryType: EntryType.DEBIT,
           amount: fee,
           description: `Transfer fee revenue`,
@@ -817,20 +840,18 @@ export class QPointsTransactionService {
         });
       }
     } else if (type === TransactionType.WITHDRAWAL) {
-      // Debit: Expense Account
       entries.push({
         transactionId: transaction.id,
-        ledgerAccountId: 'expense-withdrawals',
+        ledgerAccountId: this.resolveLedgerAccountId('expense-withdrawals'),
         entryType: EntryType.DEBIT,
         amount,
         description: `Withdrawal from account ${transaction.sourceAccountId}`,
         createdBy: transaction.initiatedBy,
       });
 
-      // Credit: Q-Points Asset Account
       entries.push({
         transactionId: transaction.id,
-        ledgerAccountId: 'asset-qpoints',
+        ledgerAccountId: this.resolveLedgerAccountId('asset-qpoints'),
         entryType: EntryType.CREDIT,
         amount,
         description: `Withdrawal to ${transaction.metadata?.destination}`,
@@ -850,7 +871,7 @@ export class QPointsTransactionService {
 
         entries.push({
           transactionId: transaction.id,
-          ledgerAccountId: 'revenue-fees',
+          ledgerAccountId: this.resolveLedgerAccountId('revenue-fees'),
           entryType: EntryType.DEBIT,
           amount: fee,
           description: `Withdrawal fee revenue`,
@@ -869,8 +890,9 @@ export class QPointsTransactionService {
    * Helper methods
    */
   private generateTransactionReference(type: TransactionType): string {
+    // ISSUE-31: CSPRNG — Math.random() is not cryptographically secure
     const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const random = crypto.randomBytes(4).toString('hex').toUpperCase();
     return `${type.substring(0, 3).toUpperCase()}-${timestamp}-${random}`;
   }
 

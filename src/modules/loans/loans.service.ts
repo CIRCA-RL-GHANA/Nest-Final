@@ -18,7 +18,15 @@ import { TransactionType } from '../qpoints/entities/qpoint-transaction.entity';
 const ORIGINATION_FEE_RATE = 0.01;
 
 /** AI Treasury internal account entity ID (platform revenue sink). */
-const AI_TREASURY_USER_ID = process.env.AI_TREASURY_USER_ID ?? 'ai-treasury';
+const AI_TREASURY_USER_ID = (() => {
+  const id = process.env.AI_TREASURY_USER_ID;
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error(
+      'AI_TREASURY_USER_ID env var is missing or not a valid UUID. Set it to a real treasury account UUID.',
+    );
+  }
+  return id;
+})();
 
 @Injectable()
 export class LoansService {
@@ -111,68 +119,98 @@ export class LoansService {
       throw new BadRequestException(`Loan ${applicationId} is not in pending status`);
     }
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-      // Update loan status
-      const netDisbursement = parseFloat(
-        (application.amountQp - application.originationFeeQp).toFixed(4),
+    if (dto.interestRate !== undefined && dto.interestRate !== application.interestRate) {
+      throw new BadRequestException(
+        `Interest rate mismatch: application quoted ${application.interestRate}, ` +
+        `approval attempted ${dto.interestRate}. Create a new application if terms changed.`,
       );
-      const interest = parseFloat(
-        (application.amountQp * (dto.interestRate ?? application.interestRate) * (application.termDays / 365)).toFixed(4),
-      );
+    }
 
-      application.status = LoanStatus.ACTIVE;
-      application.approvedBy = officerUserId;
-      application.approvedAt = new Date();
-      application.disbursedAt = new Date();
-      application.interestRate = dto.interestRate ?? application.interestRate;
-      application.termDays = dto.termDays ?? application.termDays;
-      application.outstandingQp = parseFloat((application.amountQp + interest).toFixed(4));
-      application.notes = dto.notes ?? null;
+    const netDisbursement = parseFloat(
+      (application.amountQp - application.originationFeeQp).toFixed(4),
+    );
+    const effectiveRate = application.interestRate;
+    const effectiveTermDays = dto.termDays ?? application.termDays;
+    const interest = parseFloat(
+      (application.amountQp * effectiveRate * (effectiveTermDays / 365)).toFixed(4),
+    );
 
-      // Disburse from FI entity account to borrower
-      const disburseTx = await this.qpoints.transfer(
+    // ISSUE-O: perform transfers FIRST so the loan is never ACTIVE without funds.
+    // Step 1: Disburse from FI entity account to borrower
+    const disburseTx = await this.qpoints.transfer(
+      {
+        toUserId: application.borrowerUserId,
+        amount: netDisbursement,
+        description: `Loan disbursement #${applicationId}`,
+        metadata: {
+          transactionSubType: TransactionType.TRANSFER,
+          loanApplicationId: applicationId,
+          loanType: 'LOAN_DISBURSEMENT',
+        },
+      },
+      officerUserId,
+    );
+
+    // Step 2: Route origination fee to AI Treasury (best-effort; disbursal already succeeded)
+    if (application.originationFeeQp > 0) {
+      await this.qpoints.transfer(
         {
-          toUserId: application.borrowerUserId,
-          amount: netDisbursement,
-          description: `Loan disbursement #${applicationId}`,
-          metadata: {
-            transactionSubType: TransactionType.TRANSFER,
-            loanApplicationId: applicationId,
-            loanType: 'LOAN_DISBURSEMENT',
-          },
+          toUserId: AI_TREASURY_USER_ID,
+          amount: application.originationFeeQp,
+          description: `Loan origination fee #${applicationId}`,
+          metadata: { loanApplicationId: applicationId, loanType: 'LOAN_ORIGINATION_FEE' },
         },
         officerUserId,
-      );
-
-      // Route origination fee to AI Treasury
-      if (application.originationFeeQp > 0) {
-        await this.qpoints.transfer(
-          {
-            toUserId: AI_TREASURY_USER_ID,
-            amount: application.originationFeeQp,
-            description: `Loan origination fee #${applicationId}`,
-            metadata: { loanApplicationId: applicationId, loanType: 'LOAN_ORIGINATION_FEE' },
-          },
-          officerUserId,
+      ).catch((feeErr: Error) => {
+        this.logger.error(
+          `Origination fee routing failed for loan ${applicationId} — disbursal already succeeded: ${feeErr.message}`,
         );
-      }
-
-      application.disbursementTxId = disburseTx.id;
-      const saved = await queryRunner.manager.save(application);
-
-      await queryRunner.commitTransaction();
-      this.logger.log(`Loan ${applicationId} approved and disbursed by officer ${officerUserId}`);
-      return saved;
-    } catch (err) {
-      await queryRunner.rollbackTransaction();
-      throw err;
-    } finally {
-      await queryRunner.release();
+      });
     }
+
+    // Step 3: Atomically flip status to ACTIVE now that funds are confirmed transferred.
+    // Use a pessimistic lock to guard against concurrent approval attempts.
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const app = await manager.getRepository(LoanApplication).findOne({
+        where: { id: applicationId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!app) throw new BadRequestException(`Loan ${applicationId} not found`);
+      if (app.status !== LoanStatus.PENDING) {
+        throw new BadRequestException(`Loan ${applicationId} was already processed concurrently`);
+      }
+      app.status = LoanStatus.ACTIVE;
+      app.approvedBy = officerUserId;
+      app.approvedAt = new Date();
+      app.disbursedAt = new Date();
+      app.termDays = effectiveTermDays;
+      app.outstandingQp = parseFloat((application.amountQp + interest).toFixed(4));
+      app.notes = dto.notes ?? null;
+      app.disbursementTxId = disburseTx.id;
+      return manager.getRepository(LoanApplication).save(app);
+    }).catch(async (dbErr: Error) => {
+      // DB update failed after successful transfer — reverse the disbursement.
+      this.logger.error(
+        `Loan ${applicationId} DB update failed after disbursal — reversing: ${dbErr.message}`,
+      );
+      await this.qpoints.transfer(
+        {
+          toUserId: officerUserId,
+          amount: netDisbursement,
+          description: `Loan disbursement reversal #${applicationId}`,
+          metadata: { loanApplicationId: applicationId, loanType: 'LOAN_DISBURSEMENT_REVERSAL' },
+        },
+        application.borrowerUserId,
+      ).catch((revErr: Error) => {
+        this.logger.error(
+          `CRITICAL: Loan disbursal reversal failed for ${applicationId} — manual intervention required: ${revErr.message}`,
+        );
+      });
+      throw dbErr;
+    });
+
+    this.logger.log(`Loan ${applicationId} approved and disbursed by officer ${officerUserId}`);
+    return saved;
   }
 
   /**
@@ -207,6 +245,7 @@ export class LoansService {
 
     const repayAmount = Math.min(dto.amountQp, parseFloat(application.outstandingQp.toString()));
 
+    // ISSUE-30: perform QP transfer first, then atomically persist repayment + loan update
     const tx = await this.qpoints.transfer(
       {
         toUserId: application.fiEntityId,
@@ -217,27 +256,48 @@ export class LoansService {
       payerUserId,
     );
 
-    const repayment = await this.repaymentRepo.save(
-      this.repaymentRepo.create({
-        applicationId,
-        amountQp: repayAmount,
-        txId: tx.id,
-        isAutoSweep,
-      }),
-    );
+    const repayment = await this.dataSource.transaction(async (manager) => {
+      const newOutstanding = parseFloat(
+        (parseFloat(application.outstandingQp.toString()) - repayAmount).toFixed(4),
+      );
+      application.outstandingQp = newOutstanding;
+      if (newOutstanding <= 0) {
+        application.status = LoanStatus.REPAID;
+      }
 
-    // Update outstanding balance
-    const newOutstanding = parseFloat(
-      (parseFloat(application.outstandingQp.toString()) - repayAmount).toFixed(4),
-    );
-    application.outstandingQp = newOutstanding;
-    if (newOutstanding <= 0) {
-      application.status = LoanStatus.REPAID;
-    }
-    await this.loanRepo.save(application);
+      const saved = await manager.getRepository(LoanRepayment).save(
+        manager.getRepository(LoanRepayment).create({
+          applicationId,
+          amountQp: repayAmount,
+          txId: tx.id,
+          isAutoSweep,
+        }),
+      );
+      await manager.getRepository(LoanApplication).save(application);
+      return saved;
+    }).catch(async (dbErr: Error) => {
+      // ISSUE-C: DB transaction failed after successful QP transfer — reverse it.
+      this.logger.error(
+        `Loan ${applicationId} DB update failed after QP transfer — reversing: ${dbErr.message}`,
+      );
+      await this.qpoints.transfer(
+        {
+          toUserId: payerUserId,
+          amount: repayAmount,
+          description: `Loan repayment reversal #${applicationId}`,
+          metadata: { loanApplicationId: applicationId, loanType: 'LOAN_REPAYMENT_REVERSAL', isAutoSweep },
+        },
+        application.fiEntityId,
+      ).catch((revErr: Error) => {
+        this.logger.error(
+          `CRITICAL: Loan repayment reversal failed for ${applicationId} — manual intervention required: ${revErr.message}`,
+        );
+      });
+      throw dbErr;
+    });
 
     this.logger.log(
-      `Repayment of ${repayAmount} QP for loan ${applicationId} (outstanding: ${newOutstanding})`,
+      `Repayment of ${repayAmount} QP for loan ${applicationId} (outstanding: ${application.outstandingQp})`,
     );
     return repayment;
   }

@@ -1,4 +1,5 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, Get, Param, ForbiddenException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from './entities/user.entity';
 import {
@@ -46,6 +47,7 @@ export class UsersController {
   @Public()
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @ApiOperation({ summary: 'Verify OTP code' })
   @ApiResponse({
     status: 200,
@@ -164,6 +166,7 @@ export class UsersController {
   @Public()
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @ApiOperation({ summary: 'Resend OTP to phone number' })
   @ApiBody({
     schema: {

@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Put, Patch, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Body, Param, Query, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { User } from '../users/entities/user.entity';
 import { RidesService } from './rides.service';
 import { CreateRideDto } from './dto/create-ride.dto';
 import { UpdateRideStatusDto } from './dto/update-ride-status.dto';
@@ -30,8 +31,16 @@ export class RidesController {
   @Get(':id')
   @ApiOperation({ summary: 'Get ride by ID' })
   @ApiResponse({ status: 200, description: 'Ride found', type: Ride })
-  async getRide(@Param('id') id: string): Promise<Ride> {
-    return this.ridesService.getRide(id);
+  async getRide(
+    @Param('id') id: string,
+    @CurrentUser() currentUser: User,
+  ): Promise<Ride> {
+    const ride = await this.ridesService.getRide(id);
+    // ISSUE-F: only the rider, the assigned driver, or an admin can see a ride.
+    if (ride.riderId !== currentUser.id && ride.driverId !== currentUser.id) {
+      throw new ForbiddenException('Access denied to this ride');
+    }
+    return ride;
   }
 
   @Get('user/:userId')
@@ -40,8 +49,13 @@ export class RidesController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   async getUserRides(
     @Param('userId') userId: string,
+    @CurrentUser() currentUser: User,
     @Query('limit') limit?: number,
   ): Promise<Ride[]> {
+    // ISSUE-G: users can only list their own rides.
+    if (currentUser.id !== userId) {
+      throw new ForbiddenException('You can only view your own rides');
+    }
     return this.ridesService.getUserRides(userId, limit);
   }
 
@@ -50,9 +64,14 @@ export class RidesController {
   @ApiResponse({ status: 200, description: 'Driver assigned', type: Ride })
   async patchAssignDriver(
     @Param('id') rideId: string,
+    @CurrentUser() currentUser: User,
     @Body('driverId') driverId: string,
     @Body('vehicleId') vehicleId: string,
   ): Promise<Ride> {
+    // ISSUE-H: only the driver claiming the ride can assign themselves.
+    if (currentUser.id !== driverId) {
+      throw new ForbiddenException('You can only assign yourself as driver');
+    }
     return this.ridesService.assignDriver(rideId, driverId, vehicleId);
   }
 
@@ -61,23 +80,46 @@ export class RidesController {
   @ApiResponse({ status: 200, description: 'Driver assigned', type: Ride })
   async assignDriver(
     @Param('id') rideId: string,
+    @CurrentUser() currentUser: User,
     @Body('driverId') driverId: string,
     @Body('vehicleId') vehicleId: string,
   ): Promise<Ride> {
+    // ISSUE-H: only the driver claiming the ride can assign themselves.
+    if (currentUser.id !== driverId) {
+      throw new ForbiddenException('You can only assign yourself as driver');
+    }
     return this.ridesService.assignDriver(rideId, driverId, vehicleId);
   }
 
   @Patch(':id/status')
   @ApiOperation({ summary: 'Update ride status (PATCH)' })
   @ApiResponse({ status: 200, description: 'Ride status updated', type: Ride })
-  async patchRideStatus(@Param('id') id: string, @Body() dto: UpdateRideStatusDto): Promise<Ride> {
+  async patchRideStatus(
+    @Param('id') id: string,
+    @CurrentUser() currentUser: User,
+    @Body() dto: UpdateRideStatusDto,
+  ): Promise<Ride> {
+    // ISSUE-I: only the rider or the assigned driver may update status.
+    const ride = await this.ridesService.getRide(id);
+    if (ride.riderId !== currentUser.id && ride.driverId !== currentUser.id) {
+      throw new ForbiddenException('Access denied to this ride');
+    }
     return this.ridesService.updateRideStatus(id, dto);
   }
 
   @Put(':id/status')
   @ApiOperation({ summary: 'Update ride status' })
   @ApiResponse({ status: 200, description: 'Ride status updated', type: Ride })
-  async updateRideStatus(@Param('id') id: string, @Body() dto: UpdateRideStatusDto): Promise<Ride> {
+  async updateRideStatus(
+    @Param('id') id: string,
+    @CurrentUser() currentUser: User,
+    @Body() dto: UpdateRideStatusDto,
+  ): Promise<Ride> {
+    // ISSUE-I: only the rider or the assigned driver may update status.
+    const ride = await this.ridesService.getRide(id);
+    if (ride.riderId !== currentUser.id && ride.driverId !== currentUser.id) {
+      throw new ForbiddenException('Access denied to this ride');
+    }
     return this.ridesService.updateRideStatus(id, dto);
   }
 
@@ -86,8 +128,14 @@ export class RidesController {
   @ApiResponse({ status: 200, description: 'PIN verification result' })
   async verifyRiderPIN(
     @Param('id') rideId: string,
+    @CurrentUser() currentUser: User,
     @Body() dto: VerifyPINDto,
   ): Promise<{ verified: boolean }> {
+    // ISSUE-J: only the assigned driver should verify the rider's PIN.
+    const ride = await this.ridesService.getRide(rideId);
+    if (ride.driverId !== currentUser.id) {
+      throw new ForbiddenException('Only the assigned driver can verify the rider PIN');
+    }
     return this.ridesService.verifyRiderPIN(rideId, dto);
   }
 
@@ -96,8 +144,14 @@ export class RidesController {
   @ApiResponse({ status: 200, description: 'PIN verification result' })
   async verifyDriverPIN(
     @Param('id') rideId: string,
+    @CurrentUser() currentUser: User,
     @Body() dto: VerifyPINDto,
   ): Promise<{ verified: boolean }> {
+    // ISSUE-J: only the rider should verify the driver's PIN.
+    const ride = await this.ridesService.getRide(rideId);
+    if (ride.riderId !== currentUser.id) {
+      throw new ForbiddenException('Only the rider can verify the driver PIN');
+    }
     return this.ridesService.verifyDriverPIN(rideId, dto);
   }
 

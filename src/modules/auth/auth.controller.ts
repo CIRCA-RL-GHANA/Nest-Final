@@ -1,4 +1,13 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Get, UseGuards, Headers } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  Get,
+  UseGuards,
+  Headers,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -7,6 +16,7 @@ import {
   ApiUnauthorizedResponse,
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -23,6 +33,7 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @ApiOperation({ summary: 'Login with phone number/username and password' })
   @ApiResponse({
     status: 200,
@@ -55,6 +66,7 @@ export class AuthController {
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @ApiOperation({ summary: 'Refresh access token' })
   @ApiResponse({
     status: 200,
@@ -101,10 +113,11 @@ export class AuthController {
   async logout(
     @CurrentUser() _user: User,
     @Headers('authorization') authorization: string,
+    @Body() body?: { refreshToken?: string },
   ) {
     const token = authorization?.replace(/^Bearer\s+/i, '');
     if (token) {
-      await this.authService.logout(token);
+      await this.authService.logout(token, body?.refreshToken);
     }
     return { message: 'Logged out successfully' };
   }

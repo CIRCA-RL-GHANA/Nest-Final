@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { EmailService, EmailOptions } from './email.service';
 import twilio from 'twilio';
+import { InAppNotificationEntity } from '../entities/in-app-notification.entity';
 
 export interface InAppNotification {
   userId: string;
@@ -35,12 +38,11 @@ export class NotificationService {
   private readonly twilioClient: ReturnType<typeof twilio> | null = null;
   private readonly twilioFrom: string;
 
-  // In-memory notification store for in-app notifications (until a dedicated table is added)
-  private readonly inAppStore = new Map<string, InAppNotification[]>();
-
   constructor(
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
+    @InjectRepository(InAppNotificationEntity)
+    private readonly inAppRepo: Repository<InAppNotificationEntity>,
   ) {
     const twilioSid = this.configService.get<string>('TWILIO_ACCOUNT_SID');
     const twilioToken = this.configService.get<string>('TWILIO_AUTH_TOKEN');
@@ -98,23 +100,43 @@ export class NotificationService {
   // IN-APP
   // ─────────────────────────────────────────────────────
 
-  sendInApp(notification: InAppNotification): NotificationResult {
-    const bucket = this.inAppStore.get(notification.userId) ?? [];
-    bucket.unshift(notification); // newest first
-    // Keep last 100 per user
-    if (bucket.length > 100) bucket.splice(100);
-    this.inAppStore.set(notification.userId, bucket);
-
-    this.logger.debug(`In-app notification queued for user ${notification.userId}: "${notification.title}"`);
-    return { channel: 'in_app', success: true };
+  async sendInApp(notification: InAppNotification): Promise<NotificationResult> {
+    try {
+      await this.inAppRepo.save(
+        this.inAppRepo.create({
+          userId: notification.userId,
+          title: notification.title,
+          body: notification.body,
+          type: notification.type,
+          data: notification.data ?? null,
+        }),
+      );
+      this.logger.debug(`In-app notification saved for user ${notification.userId}: "${notification.title}"`);
+      return { channel: 'in_app', success: true };
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      this.logger.error(`In-app notification save failed for user ${notification.userId}: ${error}`);
+      return { channel: 'in_app', success: false, error };
+    }
   }
 
-  getInAppNotifications(userId: string, limit = 20): InAppNotification[] {
-    return (this.inAppStore.get(userId) ?? []).slice(0, limit);
+  async getInAppNotifications(userId: string, limit = 20): Promise<InAppNotification[]> {
+    const rows = await this.inAppRepo.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+    return rows.map((r) => ({
+      userId: r.userId,
+      title: r.title,
+      body: r.body,
+      type: r.type,
+      data: r.data ?? undefined,
+    }));
   }
 
-  clearInAppNotifications(userId: string): void {
-    this.inAppStore.delete(userId);
+  async clearInAppNotifications(userId: string): Promise<void> {
+    await this.inAppRepo.delete({ userId });
   }
 
   // ─────────────────────────────────────────────────────
@@ -122,10 +144,9 @@ export class NotificationService {
   // ─────────────────────────────────────────────────────
 
   async sendPush(options: PushOptions): Promise<NotificationResult> {
-    // TODO: Integrate with Firebase Admin SDK for FCM push notifications.
-    // For now, log the intent and return success so callers are unblocked.
-    this.logger.debug(`Push notification (stub): ${options.title} → ${options.deviceToken.slice(0, 8)}...`);
-    return { channel: 'push', success: true };
+    // FCM integration not yet configured — callers must check success: false.
+    this.logger.warn(`Push notification not delivered (FCM not configured): ${options.title} → token=${options.deviceToken.slice(0, 8)}...`);
+    return { channel: 'push', success: false, error: 'FCM not configured' };
   }
 
   // ─────────────────────────────────────────────────────
@@ -152,7 +173,7 @@ export class NotificationService {
           if (payload.sms) results.push(await this.sendSms(payload.sms));
           break;
         case 'in_app':
-          if (payload.inApp) results.push(this.sendInApp(payload.inApp));
+          if (payload.inApp) results.push(await this.sendInApp(payload.inApp));
           break;
         case 'push':
           if (payload.push) results.push(await this.sendPush(payload.push));

@@ -64,7 +64,7 @@ export class ProductsService {
       query.andWhere('product.isFeatured = :isFeatured', { isFeatured });
     }
 
-    return await query.getMany();
+    return await query.take(100).getMany();
   }
 
   async getProductById(id: string): Promise<Product> {
@@ -96,6 +96,7 @@ export class ProductsService {
       .where('product.name ILIKE :query', { query: `%${query}%` })
       .orWhere('product.description ILIKE :query', { query: `%${query}%` })
       .andWhere('product.status = :status', { status: ProductStatus.ACTIVE })
+      .take(100)
       .getMany();
 
     // Re-rank via NLP TF-IDF for semantic relevance

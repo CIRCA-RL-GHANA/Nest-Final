@@ -13,9 +13,13 @@ export class WebhookSubscription extends BaseEntity {
   @Column({ type: 'text' })
   url: string;
 
-  @ApiProperty({ description: 'HMAC-SHA256 signing secret (stored hashed)' })
+  @ApiProperty({ description: 'SHA-256 hash of the signing secret (for display/lookup only)' })
   @Column({ type: 'text' })
   secretHash: string;
+
+  @ApiProperty({ description: 'AES-256-GCM encrypted signing secret (used for HMAC delivery)' })
+  @Column({ type: 'text', nullable: true })
+  secretEncrypted: string | null;
 
   @ApiProperty({ description: 'First 8 chars of secret for display' })
   @Column({ type: 'varchar', length: 8 })

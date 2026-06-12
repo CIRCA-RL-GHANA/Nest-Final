@@ -6,6 +6,7 @@ import {
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -149,7 +150,12 @@ export class UsersService {
       throw new BadRequestException('Too many failed attempts. Please request a new OTP.');
     }
 
-    if (otpRecord.code !== code) {
+    const storedBuf = Buffer.from(otpRecord.code);
+    const inputBuf = Buffer.from(code);
+    const codesMatch =
+      storedBuf.length === inputBuf.length &&
+      crypto.timingSafeEqual(storedBuf, inputBuf);
+    if (!codesMatch) {
       await this.otpRepository.update(otpRecord.id, { attempts: otpRecord.attempts + 1 });
       await this.logAudit('OTP Verification', 'FAILED', null, {
         reason: 'Incorrect OTP',
@@ -185,6 +191,18 @@ export class UsersService {
       throw new BadRequestException('User not eligible for biometric verification.');
     }
 
+    // ISSUE-D: this endpoint is @Public — block downgrade attempts.
+    // biometricVerified can only be set to true here; revocation must go through an
+    // authenticated admin endpoint to prevent any caller from locking users out.
+    if (!biometricStatus) {
+      await this.logAudit('Biometric Verification', 'FAILED', userId, {
+        reason: 'Attempt to revoke biometric via public endpoint',
+      });
+      throw new BadRequestException(
+        'Biometric verification cannot be revoked via this endpoint.',
+      );
+    }
+
     await this.userRepository.update(userId, { biometricVerified: biometricStatus });
 
     await this.logAudit('Biometric Verification', 'SUCCESS', userId, { biometricStatus });
@@ -196,6 +214,16 @@ export class UsersService {
 
   async setPin(setPinDto: SetPinDto): Promise<{ message: string }> {
     const { userId, entityId, pin } = setPinDto;
+
+    // ISSUE-E: public endpoint — verify the user exists and has completed OTP
+    // before creating a privileged Staff/OWNER record.
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new BadRequestException('User not found.');
+    }
+    if (!user.otpVerified) {
+      throw new BadRequestException('Phone number not verified. Complete OTP verification first.');
+    }
 
     try {
       // PIN will be hashed automatically via BeforeInsert hook
@@ -297,8 +325,8 @@ export class UsersService {
   }
 
   private async generateAndSendOtp(phoneNumber: string): Promise<void> {
-    // Generate 6-digit OTP
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // ISSUE-11: use CSPRNG — Math.random() is not cryptographically secure
+    const code = crypto.randomInt(100000, 1000000).toString();
     const expiryMinutes = this.configService.get<number>('security.otpExpiryMinutes') || 5;
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
@@ -317,9 +345,7 @@ export class UsersService {
       await this.sendOtpSms(phoneNumber, code);
       this.logger.log(`OTP sent to ${phoneNumber}`);
     } catch (error) {
-      this.logger.error(`Failed to send OTP SMS: ${error.message}`);
-      // Log for fallback/audit but don't block OTP creation
-      this.logger.log(`OTP generated for ${phoneNumber}: ${code} (Expires: ${expiresAt})`);
+      this.logger.error(`Failed to send OTP SMS to ${phoneNumber}: ${error.message}`);
     }
   }
 
@@ -372,14 +398,16 @@ export class UsersService {
    */
   async scoreLoginRisk(
     userId: string,
-    _ipAddress: string,
+    ipAddress: string,
   ): Promise<{ riskScore: number; flags: string[] }> {
     try {
-      const result = await this.aiFraud.scoreTransaction({
+      // ISSUE-38: use async scorer (includes TF model); ISSUE-40: include ipAddress
+      const result = await this.aiFraud.scoreTransactionAsync({
         userId,
         amount: 0,
         currency: 'NGN',
         paymentMethod: 'login',
+        metadata: { ipAddress },
       });
       return {
         riskScore: Math.round(result.riskScore * 100),
@@ -444,28 +472,16 @@ export class UsersService {
     return { exists: !!existing, phoneNumber };
   }
 
-  async resendOtp(phoneNumber: string): Promise<{ message: string; isNewUser: boolean }> {
-    let user = await this.userRepository.findOne({ where: { phoneNumber } });
-    let isNewUser = false;
-
+  async resendOtp(phoneNumber: string): Promise<{ message: string }> {
+    // ISSUE-16: never auto-create shadow users — callers must register first
+    const user = await this.userRepository.findOne({ where: { phoneNumber } });
     if (!user) {
-      // Auto-create user with just phone number; remaining fields are completed during onboarding
-      user = this.userRepository.create({
-        phoneNumber,
-        socialUsername: null,
-        wireId: null,
-        passwordHash: null,
-      });
-      user = await this.userRepository.save(user);
-      isNewUser = true;
-
-      await this.logAudit('Auto User Creation', 'SUCCESS', user.id, { phoneNumber });
-      this.logger.log(`Auto-created user for new phone: ${user.id}`);
+      throw new NotFoundException('Phone number not registered. Please register first.');
     }
 
     await this.generateAndSendOtp(phoneNumber);
     await this.logAudit('OTP Resend', 'SUCCESS', user.id, { phoneNumber });
 
-    return { message: 'OTP sent to phone number.', isNewUser };
+    return { message: 'OTP sent to phone number.' };
   }
 }

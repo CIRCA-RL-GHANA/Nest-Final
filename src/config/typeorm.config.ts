@@ -1,7 +1,15 @@
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
+import { Logger } from '@nestjs/common';
+
+const logger = new Logger('TypeOrmConfig');
 
 export const typeOrmConfig = (configService: ConfigService): TypeOrmModuleOptions => {
+  const isProduction = configService.get('NODE_ENV') === 'production';
+
+  const poolMax = parseInt(process.env.DB_POOL_MAX ?? '20', 10);
+  const poolMin = parseInt(process.env.DB_POOL_MIN ?? '5', 10);
+
   const base: Partial<TypeOrmModuleOptions> = {
     type: 'postgres',
     entities: [__dirname + '/../**/*.entity{.ts,.js}'],
@@ -9,8 +17,8 @@ export const typeOrmConfig = (configService: ConfigService): TypeOrmModuleOption
     synchronize: configService.get('database.synchronize'),
     logging: configService.get('database.logging'),
     extra: {
-      max: 20,
-      min: 5,
+      max: poolMax,
+      min: poolMin,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
     },
@@ -21,6 +29,14 @@ export const typeOrmConfig = (configService: ConfigService): TypeOrmModuleOption
     return { ...base, url: databaseUrl, ssl: { rejectUnauthorized: false } } as TypeOrmModuleOptions;
   }
 
+  const sslEnabled = configService.get<boolean>('database.ssl');
+  if (isProduction && !sslEnabled) {
+    logger.warn(
+      'DB_SSL is not enabled in production. Database traffic is unencrypted. ' +
+      'Set DB_SSL=true to enforce TLS.',
+    );
+  }
+
   return {
     ...base,
     host: configService.get('database.host'),
@@ -28,6 +44,6 @@ export const typeOrmConfig = (configService: ConfigService): TypeOrmModuleOption
     username: configService.get('database.username'),
     password: configService.get('database.password'),
     database: configService.get('database.name'),
-    ssl: configService.get('database.ssl') ? { rejectUnauthorized: false } : false,
+    ssl: sslEnabled ? { rejectUnauthorized: false } : false,
   } as TypeOrmModuleOptions;
 };

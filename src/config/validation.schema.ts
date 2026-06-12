@@ -64,8 +64,8 @@ export const validationSchema = Joi.object({
   THROTTLE_TTL: Joi.number().default(60),
   THROTTLE_LIMIT: Joi.number().default(100),
 
-  // CORS
-  CORS_ORIGIN: Joi.string().default('*'),
+  // CORS — default to empty string; production startup will reject '*' or empty (see main.ts)
+  CORS_ORIGIN: Joi.string().allow('').default(''),
   CORS_CREDENTIALS: Joi.boolean().default(true),
 
   // Logging

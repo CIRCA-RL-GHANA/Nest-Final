@@ -162,12 +162,20 @@ export class ChatService {
   }
 
   async markMessageAsRead(messageId: string, userId: string): Promise<void> {
-    const exists = await this.chatMessageRepository.findOne({
+    const message = await this.chatMessageRepository.findOne({
       where: { id: messageId },
     });
 
-    if (!exists) {
+    if (!message) {
       throw new NotFoundException(`Message ${messageId} not found`);
+    }
+
+    const session = await this.chatSessionRepository.findOne({
+      where: { id: message.sessionId },
+    });
+
+    if (!session || (session.participant1Id !== userId && session.participant2Id !== userId)) {
+      throw new BadRequestException('Not a participant in this conversation');
     }
 
     await this.chatMessageRepository.update(messageId, {

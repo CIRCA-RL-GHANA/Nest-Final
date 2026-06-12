@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { Socket, Namespace } from 'socket.io';
 import { ChatService } from '../modules/social/services/chat.service';
 import { JwtService } from '@nestjs/jwt';
+import { TokenBlacklistService } from '../modules/auth/token-blacklist.service';
 
 interface SocketUser {
   id: string;
@@ -19,11 +20,20 @@ interface SocketUser {
   username: string;
 }
 
+// ISSUE-36: per-user rate limit window
+interface RateLimitState {
+  count: number;
+  windowStart: number;
+}
+
+const WS_RATE_LIMIT_MAX = 30; // max events per window
+const WS_RATE_LIMIT_WINDOW_MS = 60_000; // 60-second window
+
 @Injectable()
 @WebSocketGateway({
   namespace: 'chat',
   cors: {
-    origin: process.env.CORS_ORIGIN?.split(',') || '*',
+    origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()).filter(Boolean) || '*',
     credentials: true,
   },
   transports: ['websocket', 'polling'],
@@ -33,6 +43,7 @@ interface SocketUser {
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(ChatGateway.name);
   private userConnections = new Map<string, Set<string>>();
+  private rateLimitMap = new Map<string, RateLimitState>();
 
   server: Namespace;
 
@@ -40,7 +51,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private chatService: ChatService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private tokenBlacklist: TokenBlacklistService,
   ) {}
+
+  private checkRateLimit(userId: string): void {
+    const now = Date.now();
+    const state = this.rateLimitMap.get(userId);
+    if (!state || now - state.windowStart > WS_RATE_LIMIT_WINDOW_MS) {
+      this.rateLimitMap.set(userId, { count: 1, windowStart: now });
+      return;
+    }
+    state.count++;
+    if (state.count > WS_RATE_LIMIT_MAX) {
+      throw new WsException('Rate limit exceeded. Please slow down.');
+    }
+  }
 
   /**
    * Handle client connection with JWT validation
@@ -65,6 +90,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
       const payload = this.jwtService.verify(token, { secret: jwtSecret });
+
+      // ISSUE-14: reject connections using a revoked (blacklisted) token
+      if (payload.jti && (await this.tokenBlacklist.isBlacklisted(payload.jti))) {
+        this.logger.warn(`Connection refused: token ${payload.jti} is blacklisted`);
+        client.disconnect();
+        return;
+      }
 
       const user: SocketUser = {
         id: payload.sub,
@@ -129,6 +161,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     try {
       const user = client.data.user as SocketUser;
+      this.checkRateLimit(user.id); // ISSUE-36
 
       if (!payload.conversationId || !payload.content?.trim()) {
         throw new WsException('Invalid message payload');
@@ -176,6 +209,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { conversationId: string },
   ) {
     const user = client.data.user as SocketUser;
+    this.checkRateLimit(user.id); // ISSUE-36
 
     client.to(`conversation:${payload.conversationId}`).emit('user:typing', {
       userId: user.id,
@@ -193,6 +227,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { conversationId: string },
   ) {
     const user = client.data.user as SocketUser;
+    this.checkRateLimit(user.id); // ISSUE-36
 
     client.to(`conversation:${payload.conversationId}`).emit('user:stopped-typing', {
       userId: user.id,
@@ -209,6 +244,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { messageId: string },
   ) {
     const user = client.data.user as SocketUser;
+    this.checkRateLimit(user.id); // ISSUE-L
 
     await this.chatService.markMessageAsRead(payload.messageId, user.id);
 
@@ -247,11 +283,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Join conversation room
    */
   @SubscribeMessage('conversation:join')
-  handleConversationJoin(
+  async handleConversationJoin(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: { conversationId: string },
   ) {
     const user = client.data.user as SocketUser;
+    // ISSUE-15: verify the user is a participant before allowing them to join the room
+    try {
+      const conversation = await this.chatService.getConversation(payload.conversationId);
+      const isMember = conversation.participants.some((p) => p.id === user.id);
+      if (!isMember) {
+        client.emit('error', { message: 'Not a member of this conversation', code: 'UNAUTHORIZED' });
+        return;
+      }
+    } catch {
+      client.emit('error', { message: 'Conversation not found', code: 'NOT_FOUND' });
+      return;
+    }
     client.join(`conversation:${payload.conversationId}`);
     this.logger.debug(`User ${user.id} joined conversation ${payload.conversationId}`);
   }

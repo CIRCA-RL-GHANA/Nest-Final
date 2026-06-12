@@ -10,6 +10,12 @@ if (process.env.SENTRY_DSN) {
     tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.2 : 1.0,
     profilesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
   });
+} else if (process.env.NODE_ENV === 'production') {
+  // Warn loudly so ops teams notice the missing DSN rather than silently running blind
+  console.warn(
+    '[WARN] SENTRY_DSN is not set. Production error tracking is disabled. ' +
+    'Set SENTRY_DSN to enable Sentry error reporting.',
+  );
 }
 
 import { NestFactory } from '@nestjs/core';
@@ -47,10 +53,19 @@ async function bootstrap() {
   app.use(compression());
 
   // CORS
-  const corsOrigins = configService
-    .get('CORS_ORIGIN')
+  const rawCorsOrigin = configService.get<string>('CORS_ORIGIN');
+  const corsOrigins = rawCorsOrigin
     ?.split(',')
-    .map((o: string) => o.trim());
+    .map((o: string) => o.trim())
+    .filter(Boolean);
+
+  if (isProduction && !corsOrigins?.length) {
+    throw new Error(
+      'CORS_ORIGIN must be explicitly set to a non-wildcard value in production. ' +
+      'Set CORS_ORIGIN=https://app.yourdomain.com (comma-separated for multiple origins).',
+    );
+  }
+
   app.enableCors({
     origin: corsOrigins?.length ? corsOrigins : '*',
     credentials: configService.get<boolean>('cors.credentials'),

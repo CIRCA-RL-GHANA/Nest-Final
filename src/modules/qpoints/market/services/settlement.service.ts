@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
+import { Cron } from '@nestjs/schedule';
 import {
   QPointSettlement,
   SettlementStatus,
@@ -206,5 +207,23 @@ export class SettlementService {
     const s = await this.repo.findOne({ where: { id: settlementId } });
     if (!s) throw new Error(`Settlement ${settlementId} not found`);
     return s;
+  }
+
+  /**
+   * ISSUE-U: Daily job at 02:00 UTC to expire PENDING settlements older than 7 days.
+   * Prevents the settlement table from accumulating stale records indefinitely.
+   */
+  @Cron('0 2 * * *')
+  async expireStaleSettlements(): Promise<void> {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const result = await this.repo.update(
+      { status: SettlementStatus.PENDING, createdAt: LessThan(cutoff) },
+      { status: SettlementStatus.EXPIRED },
+    );
+    if ((result.affected ?? 0) > 0) {
+      this.logger.warn(
+        `Settlement expiry: marked ${result.affected} PENDING settlement(s) as EXPIRED (older than 7 days)`,
+      );
+    }
   }
 }

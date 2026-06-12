@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Order, OrderStatus } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { FulfillmentSession, FulfillmentStatus } from './entities/fulfillment-session.entity';
@@ -43,11 +44,12 @@ export class OrdersService {
     private readonly aiFraud: AIFraudService,
     private readonly aiNlp: AINlpService,
     private readonly aiSearch: AISearchService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async createOrder(buyerId: string, dto: CreateOrderDto): Promise<Order> {
-    // Generate order number
-    const orderNumber = `ORD-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 99999)).padStart(5, '0')}`;
+    // ISSUE-32: CSPRNG for order number
+    const orderNumber = `ORD-${new Date().getFullYear()}-${String(crypto.randomInt(0, 99999)).padStart(5, '0')}`;
 
     // Fetch product details and calculate real totals
     const itemsWithProducts = await Promise.all(
@@ -64,8 +66,8 @@ export class OrdersService {
     const discount = 0;
     const total = parseFloat((subtotal + deliveryFee + tax - discount).toFixed(2));
 
-    // ── AI Fraud check ─────────────────────────────────────────────────────────
-    const fraudResult = this.aiFraud.scoreTransaction({
+    // ISSUE-27: use async scorer (includes TF model)
+    const fraudResult = await this.aiFraud.scoreTransactionAsync({
       userId: buyerId,
       amount: total,
       currency: 'NGN',
@@ -91,52 +93,74 @@ export class OrdersService {
       this.logger.log(`[AI-NLP] Order delivery notes keywords: ${noteKeywords.join(', ')}`);
     }
 
-    const order = this.orderRepository.create({
-      orderNumber,
-      buyerId,
-      branchId: dto.branchId,
-      status: OrderStatus.PENDING,
-      subtotal,
-      deliveryFee,
-      tax,
-      discount,
-      total,
-      paymentMethod: dto.paymentMethod,
-      isPaid: false,
-      deliveryAddress: dto.deliveryAddress,
-      deliveryNotes: dto.deliveryNotes || null,
-      metadata: {
-        ai: {
-          fraudScore: fraudResult.riskScore,
-          fraudRiskLevel: fraudResult.riskLevel,
-          reviewFlagged: fraudResult.reviewFlag,
+    // ISSUE-Z: wrap order + items in a single transaction so items are never
+    // persisted without their parent order, and a partial item-save failure rolls
+    // back the entire order.
+    return this.dataSource.transaction(async (manager) => {
+      const order = manager.getRepository(Order).create({
+        orderNumber,
+        buyerId,
+        branchId: dto.branchId,
+        status: OrderStatus.PENDING,
+        subtotal,
+        deliveryFee,
+        tax,
+        discount,
+        total,
+        paymentMethod: dto.paymentMethod,
+        isPaid: false,
+        deliveryAddress: dto.deliveryAddress,
+        deliveryNotes: dto.deliveryNotes || null,
+        metadata: {
+          ai: {
+            fraudScore: fraudResult.riskScore,
+            fraudRiskLevel: fraudResult.riskLevel,
+            reviewFlagged: fraudResult.reviewFlag,
+          },
         },
-      },
-    });
-
-    const savedOrder = await this.orderRepository.save(order);
-
-    // Create order items with real product data
-    for (const { item, product, unitPrice, totalPrice } of itemsWithProducts) {
-      const orderItem = this.orderItemRepository.create({
-        orderId: savedOrder.id,
-        productId: item.productId,
-        productName: product.name,
-        quantity: item.quantity,
-        unitPrice,
-        totalPrice,
-        notes: item.notes || null,
       });
-      await this.orderItemRepository.save(orderItem);
-    }
 
-    return savedOrder;
+      const savedOrder = await manager.getRepository(Order).save(order);
+
+      for (const { item, product, unitPrice, totalPrice } of itemsWithProducts) {
+        const orderItem = manager.getRepository(OrderItem).create({
+          orderId: savedOrder.id,
+          productId: item.productId,
+          productName: product.name,
+          quantity: item.quantity,
+          unitPrice,
+          totalPrice,
+          notes: item.notes || null,
+        });
+        await manager.getRepository(OrderItem).save(orderItem);
+      }
+
+      return savedOrder;
+    });
   }
+
+  // ISSUE-Y: valid forward-only status transitions for an order.
+  private static readonly VALID_TRANSITIONS: Partial<Record<OrderStatus, OrderStatus[]>> = {
+    [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
+    [OrderStatus.CONFIRMED]: [OrderStatus.PROCESSING, OrderStatus.CANCELLED],
+    [OrderStatus.PROCESSING]: [OrderStatus.READY_FOR_PICKUP, OrderStatus.CANCELLED],
+    [OrderStatus.READY_FOR_PICKUP]: [OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED],
+    [OrderStatus.OUT_FOR_DELIVERY]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
+    [OrderStatus.DELIVERED]: [OrderStatus.REFUNDED],
+  };
 
   async updateOrderStatus(orderId: string, dto: UpdateOrderStatusDto): Promise<Order> {
     const order = await this.orderRepository.findOne({ where: { id: orderId } });
     if (!order) {
       throw new NotFoundException('Order not found');
+    }
+
+    const allowedNext = OrdersService.VALID_TRANSITIONS[order.status];
+    if (!allowedNext || !allowedNext.includes(dto.status)) {
+      throw new BadRequestException(
+        `Cannot transition order from "${order.status}" to "${dto.status}". ` +
+        `Allowed transitions: ${allowedNext?.join(', ') ?? 'none (terminal status)'}`,
+      );
     }
 
     order.status = dto.status;
@@ -356,7 +380,8 @@ export class OrdersService {
   }
 
   async createDeliveryPackage(driverId: string, orderIds: string[]): Promise<DeliveryPackage> {
-    const packageNumber = `PKG-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 99999)).padStart(5, '0')}`;
+    // ISSUE-32: CSPRNG for package number
+    const packageNumber = `PKG-${new Date().getFullYear()}-${String(crypto.randomInt(0, 99999)).padStart(5, '0')}`;
 
     const pkg = this.packageRepository.create({
       packageNumber,
@@ -413,13 +438,27 @@ export class OrdersService {
   ): Promise<{ updated: number }> {
     if (!updates?.length) return { updated: 0 };
     if (updates.length > 100) {
-      throw new Error('Bulk order status update is limited to 100 orders per request');
+      // ISSUE-28: throw proper HTTP exception, not bare Error
+      throw new BadRequestException('Bulk order status update is limited to 100 orders per request');
     }
-    let count = 0;
+    // ISSUE-28: validate each status against the enum before writing
+    const validStatuses = Object.values(OrderStatus) as string[];
     for (const u of updates) {
-      await this.orderRepository.update(u.orderId, { status: u.status as any });
-      count++;
+      if (!validStatuses.includes(u.status)) {
+        throw new BadRequestException(
+          `Invalid order status "${u.status}". Valid values: ${validStatuses.join(', ')}`,
+        );
+      }
     }
+    // ISSUE-N: wrap all updates in a single transaction so a mid-batch failure
+    // doesn't leave the order table in a partially updated state.
+    let count = 0;
+    await this.dataSource.transaction(async (manager) => {
+      for (const u of updates) {
+        await manager.getRepository(Order).update(u.orderId, { status: u.status as OrderStatus });
+        count++;
+      }
+    });
     return { updated: count };
   }
 }

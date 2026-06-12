@@ -87,7 +87,7 @@ export class CommunityService {
     });
     if (!memberships.length) return [];
     const communityIds = memberships.map(m => m.communityId);
-    return this.communityRepo.find({ where: { id: In(communityIds) } });
+    return this.communityRepo.find({ where: { id: In(communityIds), status: CommunityStatus.ACTIVE } });
   }
 
   // ── Membership ───────────────────────────────────────────────────────────
