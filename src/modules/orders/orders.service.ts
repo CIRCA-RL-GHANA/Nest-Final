@@ -399,6 +399,23 @@ export class OrdersService {
     });
   }
 
+  async getOrderDelivery(orderId: string): Promise<Delivery | null> {
+    return this.deliveryRepository.findOne({
+      where: { orderId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async rateOrder(orderId: string, rating: number, review: string | undefined, userId: string): Promise<Order> {
+    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    order.rating = rating;
+    order.review = review ?? null;
+    return this.orderRepository.save(order);
+  }
+
   // ─── Enterprise order management ─────────────────────────────────────────
 
   /**

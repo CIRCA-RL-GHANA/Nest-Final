@@ -61,6 +61,10 @@ import { FulfillmentModule } from './modules/fulfillment/fulfillment.module';
 import { AgenticConciergeModule } from './modules/agentic-concierge/agentic-concierge.module';
 import { FacilitatorInstitutionsModule } from './modules/facilitator-institutions/facilitator-institutions.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+// ── New Feature Modules ──────────────────────────────────────────────────────
+import { AlertsModule } from './modules/alerts/alerts.module';
+import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { TabsModule } from './modules/tabs/tabs.module';
 
 @Module({
   imports: [
@@ -180,6 +184,10 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
     AgenticConciergeModule,
     FacilitatorInstitutionsModule,
     WebhooksModule,
+    // ── New Feature Modules ─────────────────────────────────────────────────
+    AlertsModule,
+    CampaignsModule,
+    TabsModule,
   ],
   providers: [
     {

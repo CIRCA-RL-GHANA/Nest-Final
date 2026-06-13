@@ -15,6 +15,7 @@ import {
   BadRequestException,
   ParseIntPipe,
   DefaultValuePipe,
+  Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Request } from 'express';
@@ -65,6 +66,8 @@ function clientUserAgent(req: Request): string {
 @UseGuards(JwtAuthGuard, QPointsTosGuard)
 @Controller('qpoints')
 export class QPointsMarketController {
+  private readonly logger = new Logger(QPointsMarketController.name);
+
   constructor(
     private readonly config: ConfigService,
     private readonly orderBook: OrderBookService,
@@ -1087,5 +1090,52 @@ export class QPointsMarketController {
   async mpesaWebhook(@Req() req: any) {
     await this.facilitatorTx.handleMpesaWebhook(req.body);
     return { received: true };
+  }
+
+  // ---------------------------------------------------------------------- settlement initiate
+
+  @Post('settlement/initiate')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Initiate a Q Points settlement transfer between two entity accounts',
+  })
+  async initiateSettlement(
+    @Body() body: { fromEntityId: string; toEntityId: string; amount: number; reference?: string },
+    @Req() req: Request,
+  ) {
+    const uid = userId(req);
+    const ref = body.reference ?? `SETTLE-${uid}-${Date.now()}`;
+    // Debit the source account, credit the destination account
+    await this.balance.adjustBalance(body.fromEntityId, -body.amount, ref);
+    await this.balance.adjustBalance(body.toEntityId, body.amount, ref);
+    this.logger.log(`Settlement initiated by ${uid}: ${body.fromEntityId} → ${body.toEntityId} amount=${body.amount} ref=${ref}`);
+    return { success: true, reference: ref, fromEntityId: body.fromEntityId, toEntityId: body.toEntityId, amount: body.amount };
+  }
+
+  // ---------------------------------------------------------------------- facilitator institution balance & issue
+
+  @Get('facilitator/institutions/:entityId/balance')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.FINANCIAL_INSTITUTION, UserRole.FI_AUDITOR)
+  @ApiOperation({ summary: '[FI] Get Q Points balance for an institution entity account' })
+  async getInstitutionBalance(@Param('entityId', ParseUUIDPipe) entityId: string) {
+    return this.balance.getBalance(entityId);
+  }
+
+  @Post('facilitator/institutions/issue')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.FINANCIAL_INSTITUTION)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: '[FI] Issue (credit) Q Points to an institution entity account' })
+  async issueQp(
+    @Body() body: { entityId: string; amount: number; reason?: string },
+    @Req() req: Request,
+  ) {
+    const uid = userId(req);
+    const ref = `ISSUE-${body.entityId}-${Date.now()}`;
+    const newBalance = await this.balance.adjustBalance(body.entityId, body.amount, ref);
+    return { success: true, entityId: body.entityId, amount: body.amount, newBalance, reason: body.reason ?? null };
   }
 }

@@ -1,5 +1,5 @@
 import {
-  Controller, Post, Get, Put, Delete,
+  Controller, Post, Get, Put, Patch, Delete,
   Body, Param, UseGuards, HttpCode, HttpStatus, ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -39,6 +39,15 @@ export class MultiChannelController {
     @Body() dto: SyncChannelDto,
   ) {
     return this.multiChannelService.syncChannel(id, dto);
+  }
+
+  @Patch('channels/:id/status')
+  @ApiOperation({ summary: 'Update channel status directly' })
+  updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { status: string },
+  ) {
+    return this.multiChannelService.updateChannelStatus(id, body.status);
   }
 
   @Delete('channels/:id')
