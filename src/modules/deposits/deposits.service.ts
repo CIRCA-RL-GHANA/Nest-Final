@@ -35,17 +35,7 @@ export class DepositsService {
     const maturityDate = new Date();
     maturityDate.setDate(maturityDate.getDate() + dto.termDays);
 
-    // Lock Q-Points: transfer from user to a segregated internal FI sub-account
-    const lockTx = await this.qpoints.transfer(
-      {
-        toUserId: dto.fiEntityId,
-        amount: dto.amountQp,
-        description: `Deposit lock for ${dto.termDays} days`,
-        metadata: { depositType: 'DEPOSIT_LOCK', termDays: dto.termDays },
-      },
-      userId,
-    );
-
+    // Create the deposit record FIRST so a DB failure never leaves funds transferred with no record
     const deposit = await this.depositRepo.save(
       this.depositRepo.create({
         userId,
@@ -55,9 +45,33 @@ export class DepositsService {
         termDays: dto.termDays,
         maturityDate,
         status: DepositStatus.ACTIVE,
-        lockTxId: lockTx.id,
       }),
     );
+
+    // Lock Q-Points: transfer from user to a segregated internal FI sub-account
+    let lockTx: { id: string };
+    try {
+      lockTx = await this.qpoints.transfer(
+        {
+          toUserId: dto.fiEntityId,
+          amount: dto.amountQp,
+          description: `Deposit lock for ${dto.termDays} days`,
+          metadata: { depositType: 'DEPOSIT_LOCK', termDays: dto.termDays },
+        },
+        userId,
+      );
+    } catch (transferErr) {
+      // Compensate: remove the deposit record so the user is not charged
+      this.logger.error(
+        `Deposit fund lock failed for deposit ${deposit.id}, reverting record: ${transferErr}`,
+      );
+      await this.depositRepo.remove(deposit);
+      throw transferErr;
+    }
+
+    // Record the lock tx ID
+    deposit.lockTxId = lockTx.id;
+    await this.depositRepo.save(deposit);
 
     this.logger.log(`Deposit ${deposit.id} created: ${dto.amountQp} QP locked for ${dto.termDays} days`);
     return deposit;

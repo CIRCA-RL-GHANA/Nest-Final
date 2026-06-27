@@ -1,4 +1,5 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, Get, Param, ForbiddenException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from './entities/user.entity';
 import {
@@ -25,6 +26,7 @@ export class UsersController {
 
   @Public()
   @Post('register')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({
@@ -45,6 +47,7 @@ export class UsersController {
 
   @Public()
   @Post('verify-otp')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify OTP code' })
   @ApiResponse({
@@ -131,12 +134,22 @@ export class UsersController {
   @ApiResponse({
     status: 200,
     description: 'Username availability result',
-    schema: {
-      example: { available: true, username: 'john_doe' },
-    },
+    schema: { example: { available: true, username: 'john_doe' } },
   })
   async checkUsername(@Param('username') username: string) {
     return this.usersService.checkUsernameAvailability(username);
+  }
+
+  @Public()
+  @Get('check-wire-id/:wireId')
+  @ApiOperation({ summary: 'Check if a Wire ID is available' })
+  @ApiResponse({
+    status: 200,
+    description: 'Wire ID availability result',
+    schema: { example: { available: true, wireId: '@johndoe' } },
+  })
+  async checkWireId(@Param('wireId') wireId: string) {
+    return this.usersService.checkWireIdAvailability(wireId);
   }
 
   @Public()
@@ -163,6 +176,7 @@ export class UsersController {
 
   @Public()
   @Post('resend-otp')
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend OTP to phone number' })
   @ApiBody({

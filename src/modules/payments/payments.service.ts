@@ -6,6 +6,7 @@ import { WalletsService } from '../wallets/wallets.service';
 import { CreatePaymentDto, QpChargeDto } from './dto/create-payment.dto';
 import { AIFraudService } from '../ai/services/ai-fraud.service';
 import { QPointsTransactionService } from '../qpoints/qpoints-transaction.service';
+import { withTimeout } from '@common/utils/with-timeout';
 
 @Injectable()
 export class PaymentsService {
@@ -19,22 +20,35 @@ export class PaymentsService {
     private readonly qpTx: QPointsTransactionService,
   ) {}
 
+  private readonly FRAUD_TIMEOUT_MS = 3_000;
+
   async processPayment(userId: string, dto: CreatePaymentDto): Promise<Payment> {
-    // AI fraud pre-check before processing
-    const fraudResult = this.aiFraud.scoreTransaction({
-      userId,
-      amount: dto.amount,
-      currency: dto.currency ?? 'NGN',
-      paymentMethod: dto.paymentMethod,
-    });
-    if (fraudResult.blocked) {
-      this.logger.warn(
-        `Payment blocked by AI fraud check for user ${userId}: ${fraudResult.reason}`,
+    // AI fraud pre-check — 3 s timeout; on timeout/error allow the transaction
+    // and log for manual review rather than blocking legitimate payments.
+    try {
+      const fraudResult = await withTimeout(
+        this.aiFraud.scoreTransactionAsync({
+          userId,
+          amount: dto.amount,
+          currency: dto.currency ?? 'NGN',
+          paymentMethod: dto.paymentMethod,
+        }),
+        this.FRAUD_TIMEOUT_MS,
       );
-      throw new BadRequestException(`Transaction blocked: ${fraudResult.reason}`);
-    }
-    if (fraudResult.reviewFlag) {
-      this.logger.warn(`Payment flagged for review (user ${userId}): ${fraudResult.reason}`);
+      if (fraudResult.blocked) {
+        this.logger.warn(
+          `Payment blocked by AI fraud check for user ${userId}: ${fraudResult.reason}`,
+        );
+        throw new BadRequestException(`Transaction blocked: ${fraudResult.reason}`);
+      }
+      if (fraudResult.reviewFlag) {
+        this.logger.warn(`Payment flagged for review (user ${userId}): ${fraudResult.reason}`);
+      }
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
+      this.logger.warn(
+        `Fraud check skipped (${e instanceof Error ? e.message : String(e)}) — proceeding with payment for user ${userId}`,
+      );
     }
 
     const payment = this.paymentRepository.create({

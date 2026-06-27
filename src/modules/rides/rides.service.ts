@@ -108,8 +108,20 @@ export class RidesService {
   async updateRideStatus(rideId: string, dto: UpdateRideStatusDto): Promise<Ride> {
     const ride = await this.getRide(rideId);
 
-    const _previousStatus = ride.status;
-    void _previousStatus; // recorded for event logging
+    const validTransitions: Partial<Record<RideStatus, RideStatus[]>> = {
+      [RideStatus.REQUESTED]: [RideStatus.DRIVER_ASSIGNED, RideStatus.CANCELLED],
+      [RideStatus.DRIVER_ASSIGNED]: [RideStatus.DRIVER_ARRIVED, RideStatus.CANCELLED],
+      [RideStatus.DRIVER_ARRIVED]: [RideStatus.RIDE_STARTED, RideStatus.CANCELLED],
+      [RideStatus.RIDE_STARTED]: [RideStatus.RIDE_COMPLETED],
+    };
+
+    const allowed = validTransitions[ride.status] ?? [];
+    if (!allowed.includes(dto.status)) {
+      throw new BadRequestException(
+        `Cannot transition ride from '${ride.status}' to '${dto.status}'`,
+      );
+    }
+
     ride.status = dto.status;
 
     if (dto.status === RideStatus.DRIVER_ARRIVED) {
@@ -133,24 +145,40 @@ export class RidesService {
   async verifyRiderPIN(rideId: string, dto: VerifyPINDto): Promise<{ verified: boolean }> {
     const ride = await this.getRide(rideId);
 
+    const attempts: number = (ride.metadata?.riderPinAttempts ?? 0);
+    if (attempts >= 5) {
+      throw new BadRequestException('Too many PIN attempts. Please request a new ride.');
+    }
+
     if (ride.riderPIN === dto.pin) {
       ride.riderPINVerified = true;
+      ride.metadata = { ...ride.metadata, riderPinAttempts: 0 };
       await this.rideRepository.save(ride);
       return { verified: true };
     }
 
+    ride.metadata = { ...ride.metadata, riderPinAttempts: attempts + 1 };
+    await this.rideRepository.save(ride);
     return { verified: false };
   }
 
   async verifyDriverPIN(rideId: string, dto: VerifyPINDto): Promise<{ verified: boolean }> {
     const ride = await this.getRide(rideId);
 
+    const attempts: number = (ride.metadata?.driverPinAttempts ?? 0);
+    if (attempts >= 5) {
+      throw new BadRequestException('Too many PIN attempts. Please request a new ride.');
+    }
+
     if (ride.driverPIN === dto.pin) {
       ride.driverPINVerified = true;
+      ride.metadata = { ...ride.metadata, driverPinAttempts: 0 };
       await this.rideRepository.save(ride);
       return { verified: true };
     }
 
+    ride.metadata = { ...ride.metadata, driverPinAttempts: attempts + 1 };
+    await this.rideRepository.save(ride);
     return { verified: false };
   }
 

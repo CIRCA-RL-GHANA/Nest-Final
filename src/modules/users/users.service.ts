@@ -20,6 +20,7 @@ import { SetPinDto } from './dto/set-pin.dto';
 import { AssignStaffRoleDto } from './dto/assign-staff-role.dto';
 import { AIFraudService } from '../ai/services/ai-fraud.service';
 import { AINlpService } from '../ai/services/ai-nlp.service';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
@@ -40,67 +41,67 @@ export class UsersService {
   ) {}
 
   async register(registerUserDto: RegisterUserDto): Promise<{ userId: string; message: string }> {
-    const { phoneNumber, socialUsername, wireId, password, ...metadata } = registerUserDto;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { phoneNumber: rawPhone, socialUsername, wireId, password, ...metadata } = registerUserDto;
+    const phoneNumber = this.normalizePhone(rawPhone);
 
-    // Check phone number uniqueness
+    // Check if a skeleton user was auto-created by resend-otp (phone exists, no credentials yet)
     const existingPhone = await this.userRepository.findOne({ where: { phoneNumber } });
     if (existingPhone) {
-      await this.logAudit('User Registration', 'FAILED', null, {
-        reason: 'Phone number exists',
-        phoneNumber,
-      });
-      throw new ConflictException('Phone number already registered. Try password recovery.');
+      const isSkeleton = !existingPhone.passwordHash && !existingPhone.socialUsername;
+      if (!isSkeleton) {
+        await this.logAudit('User Registration', 'FAILED', null, { reason: 'Phone number exists', phoneNumber });
+        throw new ConflictException('Phone number already registered. Try password recovery.');
+      }
+
+      // Complete the skeleton user — check username/wireId uniqueness (exclude the skeleton itself)
+      const takenUsername = await this.userRepository.findOne({ where: { socialUsername } });
+      if (takenUsername && takenUsername.id !== existingPhone.id) {
+        throw new ConflictException('Social username already taken. Try another.');
+      }
+      const takenWireId = await this.userRepository.findOne({ where: { wireId } });
+      if (takenWireId && takenWireId.id !== existingPhone.id) {
+        throw new ConflictException('Wire ID already in use.');
+      }
+
+      // Hash manually — @BeforeInsert does not fire on updates
+      existingPhone.socialUsername = socialUsername;
+      existingPhone.wireId = wireId;
+      existingPhone.passwordHash = await bcrypt.hash(password, 12);
+      if (metadata.deviceFingerprint) existingPhone.deviceFingerprint = metadata.deviceFingerprint;
+      if (metadata.ipAddress) existingPhone.ipAddress = metadata.ipAddress;
+
+      const updated = await this.userRepository.save(existingPhone);
+      await this.logAudit('User Registration', 'SUCCESS', updated.id, { phoneNumber, socialUsername, wireId });
+      this.logger.log(`Skeleton user completed registration: ${updated.id}`);
+      // Phone already OTP-verified in onboarding — no need to send another OTP
+      return { userId: updated.id, message: 'User registered successfully.' };
     }
 
     // Check social username availability
     const existingUsername = await this.userRepository.findOne({ where: { socialUsername } });
     if (existingUsername) {
-      await this.logAudit('User Registration', 'FAILED', null, {
-        reason: 'Username taken',
-        socialUsername,
-      });
+      await this.logAudit('User Registration', 'FAILED', null, { reason: 'Username taken', socialUsername });
       throw new ConflictException('Social username already taken. Try another.');
     }
 
     // Check Wire ID uniqueness
     const existingWireId = await this.userRepository.findOne({ where: { wireId } });
     if (existingWireId) {
-      await this.logAudit('User Registration', 'FAILED', null, {
-        reason: 'Wire ID exists',
-        wireId,
-      });
+      await this.logAudit('User Registration', 'FAILED', null, { reason: 'Wire ID exists', wireId });
       throw new ConflictException('Wire ID already in use.');
     }
 
     try {
-      // Create user (password will be hashed automatically via BeforeInsert hook)
-      const user = this.userRepository.create({
-        phoneNumber,
-        socialUsername,
-        wireId,
-        passwordHash: password,
-        ...metadata,
-      });
-
+      // Create user (password hashed by @BeforeInsert hook)
+      const user = this.userRepository.create({ phoneNumber, socialUsername, wireId, passwordHash: password, ...metadata });
       const savedUser = await this.userRepository.save(user);
 
-      // Generate and send OTP
       await this.generateAndSendOtp(phoneNumber);
-
-      // Log successful registration
-      await this.logAudit('User Registration', 'SUCCESS', savedUser.id, {
-        phoneNumber,
-        socialUsername,
-        wireId,
-        ...metadata,
-      });
-
+      await this.logAudit('User Registration', 'SUCCESS', savedUser.id, { phoneNumber, socialUsername, wireId, ...metadata });
       this.logger.log(`User registered successfully: ${savedUser.id}`);
 
-      return {
-        userId: savedUser.id,
-        message: 'User registered successfully. OTP sent to phone number.',
-      };
+      return { userId: savedUser.id, message: 'User registered successfully. OTP sent to phone number.' };
     } catch (error) {
       this.logger.error(`Registration failed: ${error.message}`, error.stack);
       await this.logAudit('User Registration', 'ERROR', null, { error: error.message });
@@ -109,7 +110,8 @@ export class UsersService {
   }
 
   async verifyOtp(verifyOtpDto: VerifyOtpDto): Promise<{ message: string }> {
-    const { phoneNumber, code } = verifyOtpDto;
+    const { code } = verifyOtpDto;
+    const phoneNumber = this.normalizePhone(verifyOtpDto.phoneNumber);
 
     // Find latest OTP for this phone number
     const otpRecord = await this.otpRepository.findOne({
@@ -324,9 +326,9 @@ export class UsersService {
   }
 
   private async sendOtpSms(phoneNumber: string, otp: string): Promise<void> {
-    const accountSid = this.configService.get<string>('TWILIO_ACCOUNT_SID');
-    const authToken = this.configService.get<string>('TWILIO_AUTH_TOKEN');
-    const fromNumber = this.configService.get<string>('TWILIO_PHONE_NUMBER');
+    const accountSid = this.configService.get<string>('sms.twilioAccountSid');
+    const authToken = this.configService.get<string>('sms.twilioAuthToken');
+    const fromNumber = this.configService.get<string>('sms.twilioPhoneNumber');
 
     if (!accountSid?.startsWith('AC') || !authToken || !fromNumber?.startsWith('+')) {
       this.logger.warn(`Twilio credentials not configured – OTP not delivered to ${phoneNumber}`);
@@ -338,7 +340,7 @@ export class UsersService {
     const client = new Twilio(accountSid, authToken);
 
     await client.messages.create({
-      body: `Your genie help verification code is: ${otp}. Valid for 10 minutes. Never share this code with anyone.`,
+      body: `Your genie help verification code is: ${otp}. Valid for ${this.configService.get<number>('security.otpExpiryMinutes') || 5} minutes. Never share this code with anyone.`,
       from: fromNumber,
       to: phoneNumber,
     });
@@ -355,11 +357,9 @@ export class UsersService {
     const bio = (user as any).bio ?? (user as any).socialUsername ?? '';
     if (!bio) return { keywords: [], sentiment: 'neutral', summary: '' };
     try {
-      const [kwResult, sentResult, sumResult] = await Promise.all([
-        this.aiNlp.extractKeywords(bio),
-        this.aiNlp.analyzeSentiment(bio),
-        this.aiNlp.summariseText(bio),
-      ]);
+      const kwResult = this.aiNlp.extractKeywords(bio);
+      const sentResult = this.aiNlp.analyzeSentiment(bio);
+      const sumResult = this.aiNlp.summariseText(bio);
       return { keywords: kwResult, sentiment: sentResult.label, summary: sumResult.summary };
     } catch {
       return { keywords: [], sentiment: 'neutral', summary: '' };
@@ -437,14 +437,41 @@ export class UsersService {
     return { available: !existing, username };
   }
 
-  async checkPhoneExists(phoneNumber: string): Promise<{ exists: boolean; phoneNumber: string }> {
+  async checkWireIdAvailability(
+    wireId: string,
+  ): Promise<{ available: boolean; wireId: string }> {
     const existing = await this.userRepository.findOne({
-      where: { phoneNumber },
+      where: { wireId },
     });
-    return { exists: !!existing, phoneNumber };
+    return { available: !existing, wireId };
+  }
+
+  /** Strip spaces, dashes, parentheses from a phone number for consistent storage and lookup. */
+  private normalizePhone(phone: string): string {
+    // Strip whitespace, hyphens, parentheses
+    let n = phone.replace(/[\s\-\(\)]/g, '');
+    // Strip leading 0 that appears right after the country code
+    // e.g. +2330545448456 → +233545448456
+    n = n.replace(/^(\+\d{1,3})0(\d+)$/, '$1$2');
+    return n;
+  }
+
+  async checkPhoneExists(
+    phoneNumber: string,
+  ): Promise<{ exists: boolean; isRegistered: boolean; phoneNumber: string }> {
+    const normalized = this.normalizePhone(phoneNumber);
+    const existing = await this.userRepository.findOne({
+      where: { phoneNumber: normalized },
+      select: ['id', 'phoneNumber', 'passwordHash', 'socialUsername'],
+    });
+    // A skeleton user (auto-created by resend-otp) has no password and no username.
+    // Treat skeleton users as new — they need to complete registration.
+    const isRegistered = !!(existing?.passwordHash && existing?.socialUsername);
+    return { exists: !!existing, isRegistered, phoneNumber };
   }
 
   async resendOtp(phoneNumber: string): Promise<{ message: string; isNewUser: boolean }> {
+    phoneNumber = this.normalizePhone(phoneNumber);
     let user = await this.userRepository.findOne({ where: { phoneNumber } });
     let isNewUser = false;
 

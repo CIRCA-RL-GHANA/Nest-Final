@@ -52,7 +52,7 @@ export class ProfilesController {
   @ApiOperation({ summary: 'Get profile by user ID' })
   @ApiResponse({ status: 200, description: 'Profile retrieved successfully', type: Profile })
   @ApiResponse({ status: 404, description: 'Profile not found' })
-  async getProfileByUserId(@Param('userId') userId: string): Promise<Profile> {
+  async getProfileByUserId(@Param('userId') userId: string): Promise<Profile | null> {
     return this.profilesService.getProfileByUserId(userId);
   }
 

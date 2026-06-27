@@ -99,17 +99,23 @@ export class AiParticipantService {
    */
   // Note: disabling the AI Participant suspends last-resort liquidity, which is an
   // operational breach of TOS §5.2. It is NOT a legal obligation (see TOS §6.1).
+  private _disabledLogged = false;
+
   @Cron('*/5 * * * * *')
   async run(): Promise<void> {
     if (!this.cfg.enabled) {
-      this.logger.warn(
-        'AI Participant is administratively disabled. ' +
-        'Last-resort standing orders will NOT be maintained (TOS §5.2 operational commitment suspended). ' +
-        'This is not a legal breach but is operationally undesirable. ' +
-        'Use POST /qpoints/admin/trading/suspend for compliant maintenance windows.',
-      );
+      if (!this._disabledLogged) {
+        this.logger.warn(
+          'AI Participant is administratively disabled. ' +
+          'Last-resort standing orders will NOT be maintained (TOS §5.2 operational commitment suspended). ' +
+          'This is not a legal breach but is operationally undesirable. ' +
+          'Use POST /qpoints/admin/trading/suspend for compliant maintenance windows.',
+        );
+        this._disabledLogged = true;
+      }
       return;
     }
+    this._disabledLogged = false; // reset if re-enabled
 
     // Phase 1 — ALWAYS ensure last-resort standing orders exist (TOS §5.2 operational commitment)
     try {

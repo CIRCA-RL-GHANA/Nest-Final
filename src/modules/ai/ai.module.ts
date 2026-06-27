@@ -24,6 +24,7 @@ import { EtlService } from './services/etl.service';
 import { PluginService } from './services/plugin.service';
 import { EventBusService } from './services/event-bus.service';
 import { ModelProvenanceService } from './services/model-provenance.service';
+import { LlmService } from './services/llm.service';
 import { AiInputSanitizerGuard } from '../../common/guards/ai-input-sanitizer.guard';
 import { EtlProcessor } from './processors/etl.processor';
 import { EventBusProcessor } from './processors/event-bus.processor';
@@ -64,6 +65,7 @@ import { EventBusProcessor } from './processors/event-bus.processor';
     EventBusProcessor,
     ModelProvenanceService,
     AiInputSanitizerGuard,
+    LlmService,
   ],
   exports: [
     AIService,
@@ -80,6 +82,7 @@ import { EventBusProcessor } from './processors/event-bus.processor';
     ModelProvenanceService,
     PluginService,
     EventBusService,
+    LlmService,
   ],
 })
 export class AIModule {}

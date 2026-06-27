@@ -661,7 +661,7 @@ export class QPointsTransactionService {
         currency: 'NGN',
         paymentMethod: String(context.transactionType),
       });
-      finalRiskScore = Math.round(0.4 * riskScore + 0.6 * (aiResult.riskScore * 100));
+      finalRiskScore = Math.min(100, Math.round(0.4 * riskScore + 0.6 * (aiResult.riskScore * 100)));
       if (aiResult.reviewFlag && !flags.includes('AI review flag')) flags.push('AI review flag');
     } catch (aiErr) {
       this.logger.warn(`AI fraud score failed, using rule-based score: ${aiErr.message}`);
@@ -1087,6 +1087,7 @@ export class QPointsTransactionService {
       // Update fraud log
       const fraudLog = await queryRunner.manager.findOne(FraudLog, {
         where: { transactionId: transaction.id },
+        order: { createdAt: 'DESC' },
       });
 
       if (fraudLog) {

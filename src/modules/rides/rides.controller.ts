@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Put, Patch, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RidesService } from './rides.service';
 import { CreateRideDto } from './dto/create-ride.dto';
 import { UpdateRideStatusDto } from './dto/update-ride-status.dto';
@@ -17,6 +18,7 @@ import { RideSOSAlert } from './entities/ride-sos-alert.entity';
 @ApiTags('rides')
 @Controller('rides')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 export class RidesController {
   constructor(private readonly ridesService: RidesService) {}
 

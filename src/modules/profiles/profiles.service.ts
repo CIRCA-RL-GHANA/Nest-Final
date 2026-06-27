@@ -220,17 +220,13 @@ export class ProfilesService {
   /**
    * Get profile by user ID
    */
-  async getProfileByUserId(userId: string): Promise<Profile> {
+  async getProfileByUserId(userId: string): Promise<Profile | null> {
     const profile = await this.profileRepository.findOne({
       where: { userId },
       relations: ['user', 'entity'],
     });
 
-    if (!profile) {
-      throw new NotFoundException('Profile not found for this user');
-    }
-
-    return profile;
+    return profile ?? null;
   }
 
   /**

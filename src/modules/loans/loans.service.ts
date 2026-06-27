@@ -133,42 +133,62 @@ export class LoansService {
       application.outstandingQp = parseFloat((application.amountQp + interest).toFixed(4));
       application.notes = dto.notes ?? null;
 
-      // Disburse from FI entity account to borrower
-      const disburseTx = await this.qpoints.transfer(
-        {
-          toUserId: application.borrowerUserId,
-          amount: netDisbursement,
-          description: `Loan disbursement #${applicationId}`,
-          metadata: {
-            transactionSubType: TransactionType.TRANSFER,
-            loanApplicationId: applicationId,
-            loanType: 'LOAN_DISBURSEMENT',
-          },
-        },
-        officerUserId,
-      );
+      // Save application record FIRST so a DB failure never leaves money transferred with no record
+      const saved = await queryRunner.manager.save(application);
+      await queryRunner.commitTransaction();
 
-      // Route origination fee to AI Treasury
-      if (application.originationFeeQp > 0) {
-        await this.qpoints.transfer(
+      // Disburse from FI entity account (not the officer's personal account) to borrower
+      let disburseTx: { id: string };
+      try {
+        disburseTx = await this.qpoints.transfer(
           {
-            toUserId: AI_TREASURY_USER_ID,
-            amount: application.originationFeeQp,
-            description: `Loan origination fee #${applicationId}`,
-            metadata: { loanApplicationId: applicationId, loanType: 'LOAN_ORIGINATION_FEE' },
+            toUserId: application.borrowerUserId,
+            amount: netDisbursement,
+            description: `Loan disbursement #${applicationId}`,
+            metadata: {
+              transactionSubType: TransactionType.TRANSFER,
+              loanApplicationId: applicationId,
+              loanType: 'LOAN_DISBURSEMENT',
+            },
           },
-          officerUserId,
+          application.fiEntityId,
         );
+
+        // Route origination fee to AI Treasury from FI entity account
+        if (application.originationFeeQp > 0) {
+          await this.qpoints.transfer(
+            {
+              toUserId: AI_TREASURY_USER_ID,
+              amount: application.originationFeeQp,
+              description: `Loan origination fee #${applicationId}`,
+              metadata: { loanApplicationId: applicationId, loanType: 'LOAN_ORIGINATION_FEE' },
+            },
+            application.fiEntityId,
+          );
+        }
+      } catch (transferErr) {
+        // Compensate: revert application back to PENDING so the loan can be retried
+        this.logger.error(
+          `Loan disbursement transfer failed for ${applicationId}, reverting to PENDING: ${transferErr}`,
+        );
+        saved.status = LoanStatus.PENDING;
+        saved.approvedBy = null as any;
+        saved.approvedAt = null as any;
+        saved.disbursedAt = null as any;
+        await this.loanRepo.save(saved);
+        throw transferErr;
       }
 
-      application.disbursementTxId = disburseTx.id;
-      const saved = await queryRunner.manager.save(application);
+      // Record the disbursement tx ID
+      saved.disbursementTxId = disburseTx.id;
+      await this.loanRepo.save(saved);
 
-      await queryRunner.commitTransaction();
       this.logger.log(`Loan ${applicationId} approved and disbursed by officer ${officerUserId}`);
       return saved;
     } catch (err) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
       throw err;
     } finally {
       await queryRunner.release();

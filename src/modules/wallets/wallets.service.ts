@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
 import { AIFraudService } from '../ai/services/ai-fraud.service';
+import { withTimeout } from '@common/utils/with-timeout';
 
 @Injectable()
 export class WalletsService {
@@ -70,33 +71,28 @@ export class WalletsService {
       throw new BadRequestException('Amount must be positive');
     }
 
-    // AI fraud check on high-value wallet deductions (> 5000 NGN equivalent)
-    if (amount >= 5000) {
-      try {
-        const fraudCheck = this.aiFraud.scoreTransaction({
-          userId,
-          amount,
-          currency: 'NGN',
-          paymentMethod: 'wallet',
-        });
-        if (fraudCheck.blocked) {
-          this.logger.warn(
-            `Wallet deduction BLOCKED by AI fraud check for user ${userId}: score=${fraudCheck.riskScore}`,
-          );
-          throw new BadRequestException(
-            'Transaction blocked by fraud detection. Please contact support.',
-          );
-        }
-        if (fraudCheck.reviewFlag) {
-          this.logger.warn(
-            `Wallet deduction flagged for review: user=${userId}, amount=${amount}, score=${fraudCheck.riskScore}`,
-          );
-        }
-      } catch (e) {
-        if (e instanceof BadRequestException) throw e;
-        // AI check is best-effort — log and proceed on unexpected errors
-        this.logger.error(`AI fraud check error: ${e instanceof Error ? e.message : String(e)}`);
+    // AI fraud check — 3 s timeout; on timeout/error allow and log (best-effort)
+    try {
+      const fraudCheck = await withTimeout(
+        this.aiFraud.scoreTransactionAsync({ userId, amount, currency: 'NGN', paymentMethod: 'wallet' }),
+        3_000,
+      );
+      if (fraudCheck.blocked) {
+        this.logger.warn(
+          `Wallet deduction BLOCKED by AI fraud check for user ${userId}: score=${fraudCheck.riskScore}`,
+        );
+        throw new BadRequestException(
+          'Transaction blocked by fraud detection. Please contact support.',
+        );
       }
+      if (fraudCheck.reviewFlag) {
+        this.logger.warn(
+          `Wallet deduction flagged for review: user=${userId}, amount=${amount}, score=${fraudCheck.riskScore}`,
+        );
+      }
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
+      this.logger.warn(`AI fraud check skipped (${e instanceof Error ? e.message : String(e)}) — proceeding with wallet deduction for user ${userId}`);
     }
 
     return this.dataSource.transaction(async (manager: EntityManager) => {

@@ -54,6 +54,9 @@ import { LoansModule } from './modules/loans/loans.module';
 import { DepositsModule } from './modules/deposits/deposits.module';
 import { InsuranceModule } from './modules/insurance/insurance.module';
 import { CreditDataModule } from './modules/credit-data/credit-data.module';
+// ── Setup Dashboard Extension ─────────────────────────────────────────────────
+import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { TabsModule } from './modules/tabs/tabs.module';
 // ── Enterprise Extension ──────────────────────────────────────────────────────
 import { EnterpriseModule } from './modules/enterprise/enterprise.module';
 import { MultiChannelModule } from './modules/multi-channel/multi-channel.module';
@@ -61,6 +64,7 @@ import { FulfillmentModule } from './modules/fulfillment/fulfillment.module';
 import { AgenticConciergeModule } from './modules/agentic-concierge/agentic-concierge.module';
 import { FacilitatorInstitutionsModule } from './modules/facilitator-institutions/facilitator-institutions.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { AlertsModule } from './modules/alerts/alerts.module';
 
 @Module({
   imports: [
@@ -180,6 +184,9 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
     AgenticConciergeModule,
     FacilitatorInstitutionsModule,
     WebhooksModule,
+    AlertsModule,
+    CampaignsModule,
+    TabsModule,
   ],
   providers: [
     {

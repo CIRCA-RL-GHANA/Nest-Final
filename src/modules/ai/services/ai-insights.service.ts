@@ -134,6 +134,9 @@ export class AIInsightsService {
   getSpendingPattern(
     transactions: Array<{ amount: number; category: string; date: Date }>,
   ): SpendingPattern {
+    if (!transactions.length) {
+      return { topCategories: [], avgDailySpend: 0, avgWeeklySpend: 0, highestSingleExpense: 0, largestCategory: 'none' };
+    }
     const total = transactions.reduce((s, t) => s + t.amount, 0);
     const days = Math.max(
       1,

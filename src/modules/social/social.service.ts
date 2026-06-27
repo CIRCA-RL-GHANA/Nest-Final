@@ -168,6 +168,15 @@ export class SocialService {
     return savedMessage;
   }
 
+  async getChatSessionById(sessionId: string, userId: string): Promise<ChatSession> {
+    const session = await this.chatSessionRepository.findOne({ where: { id: sessionId } });
+    if (!session) throw new NotFoundException(`Chat session ${sessionId} not found`);
+    if (session.participant1Id !== userId && session.participant2Id !== userId) {
+      throw new BadRequestException('Not authorized to access this session');
+    }
+    return session;
+  }
+
   async getChatSessions(userId: string): Promise<ChatSession[]> {
     return await this.chatSessionRepository
       .createQueryBuilder('session')

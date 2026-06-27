@@ -50,9 +50,24 @@ async function bootstrap() {
   const corsOrigins = configService
     .get('CORS_ORIGIN')
     ?.split(',')
-    .map((o: string) => o.trim());
+    .map((o: string) => o.trim())
+    .filter(Boolean);
+
+  // In development allow any localhost origin (Flutter web, Swagger, etc.)
+  const originConfig = !isProduction
+    ? (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+        if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin) || corsOrigins?.includes(origin)) {
+          cb(null, true);
+        } else {
+          cb(null, false);
+        }
+      }
+    : corsOrigins?.length
+    ? corsOrigins
+    : '*';
+
   app.enableCors({
-    origin: corsOrigins?.length ? corsOrigins : '*',
+    origin: originConfig,
     credentials: configService.get<boolean>('cors.credentials'),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],

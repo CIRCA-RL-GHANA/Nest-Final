@@ -18,6 +18,7 @@ import { QPointAccount } from '../qpoints/entities/qpoint-account.entity';
 import { AIFraudService } from '../ai/services/ai-fraud.service';
 import { AINlpService } from '../ai/services/ai-nlp.service';
 import { AISearchService } from '../ai/services/ai-search.service';
+import { withTimeout } from '@common/utils/with-timeout';
 
 @Injectable()
 export class OrdersService {
@@ -64,24 +65,42 @@ export class OrdersService {
     const discount = 0;
     const total = parseFloat((subtotal + deliveryFee + tax - discount).toFixed(2));
 
-    // ── AI Fraud check ─────────────────────────────────────────────────────────
-    const fraudResult = this.aiFraud.scoreTransaction({
-      userId: buyerId,
-      amount: total,
-      currency: 'NGN',
-      paymentMethod: dto.paymentMethod ?? 'unknown',
-    });
-
-    if (fraudResult.blocked) {
-      this.logger.warn(
-        `[AI-FRAUD] Order blocked for buyer ${buyerId}: score=${fraudResult.riskScore}`,
+    // ── AI Fraud check — 3 s timeout; allow + log on timeout/error ────────────
+    let fraudMeta: { fraudScore: number; fraudRiskLevel: string; reviewFlagged: boolean } = {
+      fraudScore: 0,
+      fraudRiskLevel: 'low',
+      reviewFlagged: false,
+    };
+    try {
+      const fraudResult = await withTimeout(
+        this.aiFraud.scoreTransactionAsync({
+          userId: buyerId,
+          amount: total,
+          currency: 'NGN',
+          paymentMethod: dto.paymentMethod ?? 'unknown',
+        }),
+        3_000,
       );
-      throw new BadRequestException('Order declined due to suspicious activity. Contact support.');
-    }
-
-    if (fraudResult.reviewFlag) {
+      if (fraudResult.blocked) {
+        this.logger.warn(
+          `[AI-FRAUD] Order blocked for buyer ${buyerId}: score=${fraudResult.riskScore}`,
+        );
+        throw new BadRequestException('Order declined due to suspicious activity. Contact support.');
+      }
+      if (fraudResult.reviewFlag) {
+        this.logger.warn(
+          `[AI-FRAUD] Order flagged for review — buyer=${buyerId} score=${fraudResult.riskScore}`,
+        );
+      }
+      fraudMeta = {
+        fraudScore: fraudResult.riskScore,
+        fraudRiskLevel: fraudResult.riskLevel,
+        reviewFlagged: fraudResult.reviewFlag,
+      };
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
       this.logger.warn(
-        `[AI-FRAUD] Order flagged for review — buyer=${buyerId} score=${fraudResult.riskScore}`,
+        `[AI-FRAUD] Check skipped (${e instanceof Error ? e.message : String(e)}) — proceeding with order for buyer ${buyerId}`,
       );
     }
 
@@ -105,13 +124,7 @@ export class OrdersService {
       isPaid: false,
       deliveryAddress: dto.deliveryAddress,
       deliveryNotes: dto.deliveryNotes || null,
-      metadata: {
-        ai: {
-          fraudScore: fraudResult.riskScore,
-          fraudRiskLevel: fraudResult.riskLevel,
-          reviewFlagged: fraudResult.reviewFlag,
-        },
-      },
+      metadata: { ai: fraudMeta },
     });
 
     const savedOrder = await this.orderRepository.save(order);

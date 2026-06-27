@@ -20,133 +20,140 @@ import * as bcrypt from 'bcrypt';
  *   - Wallets, Q-Points, and Subscriptions per customer
  */
 
+const dbUrl = process.env.DATABASE_URL;
+if (!dbUrl) throw new Error('DATABASE_URL must be set in .env');
+
 const dataSource = new DataSource({
   type: 'postgres',
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432', 10),
-  username: process.env.DB_USERNAME || 'postgres',
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME || 'promptgenie_dev',
+  url: dbUrl,
+  ssl: dbUrl.includes('neon.tech') || dbUrl.includes('railway') ? { rejectUnauthorized: false } : false,
   entities: [path.resolve(__dirname, '../../**/*.entity{.ts,.js}')],
   synchronize: false,
   logging: false,
 });
 
-async function seed() {
-  console.log('🌱 Connecting to database...');
-  await dataSource.initialize();
-  console.log('✅ Database connected');
-  console.log('🌱 Starting seed...\n');
+const TEST_PHONE = '+233244000001';
+const TEST_USERNAME = 'testuser';
+const TEST_WIRE_ID = '@testuser';
+const TEST_PASSWORD = 'Test123!@#';
+const TEST_NAME = 'Alex Morgan';
 
-  const queryRunner = dataSource.createQueryRunner();
-  await queryRunner.connect();
-  await queryRunner.startTransaction();
+async function seed() {
+  console.log('🌱 Connecting…');
+  await dataSource.initialize();
+  console.log('✅ Connected\n');
+
+  const qr = dataSource.createQueryRunner();
+  await qr.connect();
+  await qr.startTransaction();
 
   try {
-    // 1. Admin user
-    const adminHash = await bcrypt.hash('AdminPassword123!', 12);
-    const [admin] = await queryRunner.query(
-      `INSERT INTO users
-        (email, phone_number, password_hash, first_name, last_name, user_type, account_status,
-         is_email_verified, is_phone_verified, is_identity_verified, two_factor_enabled)
-       VALUES ($1,$2,$3,$4,$5,'ADMIN','ACTIVE',true,true,true,true)
-       ON CONFLICT (email) DO NOTHING
-       RETURNING id`,
-      ['admin@genieinprompt.app', '+10000000000', adminHash, 'Admin', 'User'],
-    );
-    if (admin) console.log('✅ Admin created:', admin.id);
-    else console.log('ℹ️  Admin already exists, skipping');
+    // 1. Test user
+    let [user] = await qr.query(
+      `SELECT id FROM users WHERE "phoneNumber"=$1 LIMIT 1`, [TEST_PHONE]);
+    if (user) {
+      console.log(`ℹ️  Test user exists: ${user.id}`);
+    } else {
+      const hash = await bcrypt.hash(TEST_PASSWORD, 12);
+      [user] = await qr.query(
+        `INSERT INTO users ("phoneNumber","socialUsername","wireId","passwordHash","otpVerified","biometricVerified")
+         VALUES ($1,$2,$3,$4,true,false) RETURNING id`,
+        [TEST_PHONE, TEST_USERNAME, TEST_WIRE_ID, hash]);
+      console.log(`✅ Test user: ${user.id}`);
+    }
+    const userId: string = user.id;
 
-    // 2. Sample customers
-    const customerIds: string[] = [];
-    for (let i = 1; i <= 5; i++) {
-      const hash = await bcrypt.hash('Customer123!', 12);
-      const [row] = await queryRunner.query(
-        `INSERT INTO users
-          (email, phone_number, password_hash, first_name, last_name, user_type, account_status,
-           is_email_verified, is_phone_verified, two_factor_enabled)
-         VALUES ($1,$2,$3,'Customer',$4,'CUSTOMER','ACTIVE',true,true,false)
-         ON CONFLICT (email) DO NOTHING
-         RETURNING id`,
-        [`customer${i}@genieinprompt.app`, `+1234567${String(i).padStart(3, '0')}`, hash, `${i}`],
-      );
-      if (row) {
-        customerIds.push(row.id);
-        console.log(`✅ Customer ${i} created:`, row.id);
-      } else {
-        console.log(`ℹ️  Customer ${i} already exists`);
+    // 2. Entity
+    let [entity] = await qr.query(
+      `SELECT id FROM entities WHERE "ownerId"=$1 AND type='Individual' LIMIT 1`, [userId]);
+    if (entity) {
+      console.log(`ℹ️  Entity exists: ${entity.id}`);
+    } else {
+      [entity] = await qr.query(
+        `INSERT INTO entities (type,"wireId","socialUsername","ownerId",name,"phoneNumber",verified)
+         VALUES ('Individual',$1,$2,$3,$4,$5,true) RETURNING id`,
+        [TEST_WIRE_ID, TEST_USERNAME, userId, TEST_NAME, TEST_PHONE]);
+      console.log(`✅ Entity: ${entity.id}`);
+    }
+    const entityId: string = entity.id;
+
+    // 3. Profile
+    const [existProfile] = await qr.query(
+      `SELECT id FROM profiles WHERE "userId"=$1 LIMIT 1`, [userId]);
+    if (existProfile) {
+      console.log(`ℹ️  Profile exists: ${existProfile.id}`);
+    } else {
+      const [profile] = await qr.query(
+        `INSERT INTO profiles ("userId","entityId","publicName",bio,"mfaVerified")
+         VALUES ($1,$2,$3,$4,false) RETURNING id`,
+        [userId, entityId, TEST_NAME, 'Development test account.']);
+      console.log(`✅ Profile: ${profile.id}`);
+    }
+
+    // 4. Wallet
+    const [existWallet] = await qr.query(
+      `SELECT id FROM wallets WHERE "userId"=$1 LIMIT 1`, [userId]);
+    if (!existWallet) {
+      await qr.query(
+        `INSERT INTO wallets ("userId",balance,currency,"isActive") VALUES ($1,24430.00,'USD',true)`,
+        [userId]);
+      console.log('✅ Wallet ($24,430.00 USD)');
+    } else {
+      console.log('ℹ️  Wallet exists');
+    }
+
+    // 5. QPoints (stored per entity in qpoint_accounts)
+    const [existQP] = await qr.query(
+      `SELECT id FROM qpoint_accounts WHERE "entityId"=$1 LIMIT 1`, [entityId]);
+    if (!existQP) {
+      await qr.query(
+        `INSERT INTO qpoint_accounts ("entityId",balance,currency,"isActive","totalEarned","totalSpent")
+         VALUES ($1,1248,'QP',true,1248,0)`,
+        [entityId]);
+      console.log('✅ QPoints (1,248 QP)');
+    } else {
+      console.log('ℹ️  QPoints exist');
+    }
+
+    // 6. Back-fill profiles for verified users missing one
+    const orphans = await qr.query(
+      `SELECT u.id, u."phoneNumber", u."socialUsername", u."wireId"
+       FROM users u LEFT JOIN profiles p ON p."userId"=u.id
+       WHERE p.id IS NULL AND u."otpVerified"=true AND u."phoneNumber"!=$1`,
+      [TEST_PHONE]);
+
+    for (const u of orphans) {
+      let [ent] = await qr.query(
+        `SELECT id FROM entities WHERE "ownerId"=$1 LIMIT 1`, [u.id]);
+      if (!ent) {
+        const wid = u.wireId ?? `@u${u.id.slice(0,8)}`;
+        const uname = u.socialUsername ?? `u${u.id.slice(0,8)}`;
+        [ent] = await qr.query(
+          `INSERT INTO entities (type,"wireId","socialUsername","ownerId","phoneNumber",verified)
+           VALUES ('Individual',$1,$2,$3,$4,false) RETURNING id`,
+          [wid, uname, u.id, u.phoneNumber]);
       }
+      await qr.query(
+        `INSERT INTO profiles ("userId","entityId","publicName","mfaVerified")
+         VALUES ($1,$2,$3,false) ON CONFLICT DO NOTHING`,
+        [u.id, ent.id, u.socialUsername ?? 'User']);
+      console.log(`✅ Back-filled profile for ${u.phoneNumber}`);
     }
 
-    // 3. Sample drivers
-    for (let i = 1; i <= 3; i++) {
-      const hash = await bcrypt.hash('Driver123!', 12);
-      const [row] = await queryRunner.query(
-        `INSERT INTO users
-          (email, phone_number, password_hash, first_name, last_name, user_type, account_status,
-           is_email_verified, is_phone_verified, is_identity_verified, two_factor_enabled)
-         VALUES ($1,$2,$3,'Driver',$4,'DRIVER','ACTIVE',true,true,true,true)
-         ON CONFLICT (email) DO NOTHING
-         RETURNING id`,
-        [`driver${i}@genieinprompt.app`, `+1987654${String(i).padStart(3, '0')}`, hash, `${i}`],
-      );
-      if (row) console.log(`✅ Driver ${i} created:`, row.id);
-      else console.log(`ℹ️  Driver ${i} already exists`);
-    }
-
-    // 4. Sample vendors
-    for (let i = 1; i <= 2; i++) {
-      const hash = await bcrypt.hash('Vendor123!', 12);
-      const [row] = await queryRunner.query(
-        `INSERT INTO users
-          (email, phone_number, password_hash, first_name, last_name, user_type, account_status,
-           is_email_verified, is_phone_verified, is_identity_verified, two_factor_enabled)
-         VALUES ($1,$2,$3,'Vendor',$4,'VENDOR','ACTIVE',true,true,true,false)
-         ON CONFLICT (email) DO NOTHING
-         RETURNING id`,
-        [`vendor${i}@genieinprompt.app`, `+1555123${String(i).padStart(3, '0')}`, hash, `${i}`],
-      );
-      if (row) console.log(`✅ Vendor ${i} created:`, row.id);
-      else console.log(`ℹ️  Vendor ${i} already exists`);
-    }
-
-    // 5. Wallets and Q-Points for each freshly created customer
-    for (const custId of customerIds) {
-      await queryRunner.query(
-        `INSERT INTO wallets (user_id, balance, currency, total_credited, status)
-         VALUES ($1, 500.00, 'USD', 500.00, 'ACTIVE')
-         ON CONFLICT (user_id) DO NOTHING`,
-        [custId],
-      );
-      await queryRunner.query(
-        `INSERT INTO qpoints (user_id, balance, total_earned, status, expiry_date)
-         VALUES ($1, 1000, 1000, 'ACTIVE', NOW() + INTERVAL '1 year')
-         ON CONFLICT (user_id) DO NOTHING`,
-        [custId],
-      );
-    }
-    if (customerIds.length) {
-      console.log(`✅ Wallets and Q-Points created for ${customerIds.length} customers`);
-    }
-
-    await queryRunner.commitTransaction();
-    console.log('\n✨ Seed completed successfully!');
-    console.log('\n📊 Summary:');
-    console.log('  - 1 Admin   → admin@genieinprompt.app       / AdminPassword123!');
-    console.log('  - 5 Customers → customer[1-5]@genieinprompt.app / Customer123!');
-    console.log('  - 3 Drivers → driver[1-3]@genieinprompt.app    / Driver123!');
-    console.log('  - 2 Vendors → vendor[1-2]@genieinprompt.app    / Vendor123!');
+    await qr.commitTransaction();
+    console.log('\n✨ Seed done!');
+    console.log('─────────────────────────────');
+    console.log(`Phone:    ${TEST_PHONE}`);
+    console.log(`Password: ${TEST_PASSWORD}`);
+    console.log('─────────────────────────────');
   } catch (err) {
-    await queryRunner.rollbackTransaction();
-    console.error('❌ Seed failed, rolled back:', err);
+    await qr.rollbackTransaction();
+    console.error('❌ Seed failed:', err);
     throw err;
   } finally {
-    await queryRunner.release();
+    await qr.release();
     await dataSource.destroy();
   }
 }
 
-seed().catch((err) => {
-  console.error('💥 Fatal:', err);
-  process.exit(1);
-});
+seed().catch(err => { console.error('💥 Fatal:', err); process.exit(1); });

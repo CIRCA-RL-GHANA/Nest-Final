@@ -1,0 +1,60 @@
+PROMPT GENIE — BUG LIST
+======================
+
+BUG 1 — Loan money sent from wrong account [BACKEND]
+When a loan officer approves a loan, the money is taken from the officer's own personal
+account instead of the bank/FI's account. Officers would unknowingly fund loans themselves.
+
+BUG 2 — Loan approval not fully atomic [BACKEND]
+When a loan is approved, money is transferred first and the loan record is saved after.
+If saving fails, the borrower receives money but no loan is ever recorded — free money exploit.
+
+BUG 3 — Deposit not fully atomic [BACKEND]
+When a deposit is created, funds are locked first and the deposit record is saved after.
+If saving fails, the user loses their money with no deposit record to track or recover it.
+
+BUG 4 — All ride endpoints open to anyone, no login required [BACKEND]
+The rides section has no authentication guard. Anyone on the internet — without logging in —
+can create rides, trigger SOS alerts, assign drivers, and change ride status.
+
+BUG 5 — Fraud check skipped for small amounts [BACKEND]
+The system only checks for fraud on transactions of 5000 NGN or more. An attacker can
+split a large transfer into multiple 4999 NGN chunks to completely bypass fraud detection.
+
+BUG 6 — Ride PIN can be guessed by trying unlimited times [BACKEND]
+There is no limit on how many times someone can try to guess a ride verification PIN.
+A 6-digit PIN (1 million possibilities) can be brute-forced with repeated requests.
+
+BUG 7 — Role guard lets unauthenticated users through [BACKEND]
+When a route has no role restriction set, the guard approves the request even if the user
+is not logged in at all. Anyone can access undecorated endpoints.
+
+BUG 8 — App crashes when spending analysis has no transactions [BACKEND]
+If the list of transactions passed to the spending pattern calculator is empty, the math
+produces NaN and -Infinity values instead of zeros, corrupting any report that uses it.
+
+BUG 9 — Ride status can be set to anything, in any order [BACKEND]
+There is no check on valid ride state transitions. A driver can jump a ride directly from
+"requested" to "completed", skipping PIN verification and producing a wrong fare.
+
+BUG 10 — Fraud risk score can exceed 100 [BACKEND]
+The blended fraud score (combining rule-based + AI score) can go above 100 due to how
+the math is set up. This creates misleading risk scores stored on transaction records.
+
+BUG 11 — Wrong fraud log entry may get marked as reviewed [BACKEND]
+When a flagged transaction is reviewed by a compliance officer, the system may update an
+old or unrelated fraud log entry instead of the most recent one for that transaction.
+
+BUG 12 — OTP text message says "valid for 10 minutes" but it expires in 5 [BACKEND]
+The verification code SMS tells users they have 10 minutes, but the code actually expires
+after 5 minutes. Users trying at the 6–10 minute mark will always get "invalid code".
+
+BUG 13 — Twilio SMS credentials read with wrong config key names [BACKEND]
+The SMS service looks up Twilio credentials using flat key names that don't match the
+structured config layout. On strict config setups, credentials return undefined and OTPs
+are silently never sent — users cannot verify their phone numbers.
+
+BUG 14 — Synchronous AI functions inside async error handler — crashes escape the catch [BACKEND]
+Three AI text analysis functions (keyword extract, sentiment, summarise) are synchronous
+but placed inside a Promise.all. If any throws before the promise is created, the error
+escapes the surrounding try/catch and crashes the request handler.

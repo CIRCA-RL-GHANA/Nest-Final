@@ -1,14 +1,16 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { PlacesService } from './places.service';
 import { CreatePlaceDto } from './dto/create-place.dto';
 import { UpdatePlaceDto } from './dto/update-place.dto';
 import { Place, PlaceVisibility } from './entities/place.entity';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../users/entities/user.entity';
 
 @ApiTags('Places')
+@ApiBearerAuth()
 @Controller('places')
 export class PlacesController {
   constructor(private readonly placesService: PlacesService) {}
@@ -146,6 +148,7 @@ export class PlacesController {
   // the same verify action.
   @Patch(':id/verify')
   @Roles(UserRole.ADMIN)
+  @UseGuards(RolesGuard)
   @ApiOperation({ summary: 'Verify a place (admin only)' })
   @ApiResponse({ status: 200, description: 'Place verified', type: Place })
   @ApiResponse({ status: 404, description: 'Place not found' })

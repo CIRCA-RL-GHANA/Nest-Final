@@ -14,6 +14,7 @@ import {
 } from './entities/concierge.entity';
 import { CreateSessionDto, SendMessageDto, UpdateSessionContextDto } from './dto/concierge.dto';
 import { AINlpService } from '../ai/services/ai-nlp.service';
+import { LlmService, ChatMessage } from '../ai/services/llm.service';
 
 export interface ConciergeReply {
   sessionId: string;
@@ -33,6 +34,7 @@ export class AgenticConciergeService {
     @InjectRepository(ConciergeMessage)
     private readonly messageRepo: Repository<ConciergeMessage>,
     private readonly nlpService: AINlpService,
+    private readonly llm: LlmService,
   ) {}
 
   // ─── Sessions ─────────────────────────────────────────────────────────────
@@ -117,11 +119,8 @@ export class AgenticConciergeService {
       detectedIntent,
     };
 
-    // ── Generate reply ────────────────────────────────────────────────────────
-    // In production this calls the configured LLM (OpenAI / local model) with
-    // the full conversation history + turnContext as system context.
-    // Here we produce a structured placeholder that reflects intent resolution.
-    const reply = this.buildReply(dto.message, detectedIntent, turnContext);
+    // ── Generate reply ─────────────────────────────────────────────────────
+    const reply = await this.generateReply(sessionId, dto.message, detectedIntent, turnContext);
 
     // Persist assistant message
     const assistantMsg = await this.messageRepo.save(
@@ -135,34 +134,76 @@ export class AgenticConciergeService {
       }),
     );
 
-    return {
-      sessionId,
-      messageId: assistantMsg.id,
-      reply,
-      detectedIntent,
-      intentConfidence,
-    };
+    return { sessionId, messageId: assistantMsg.id, reply, detectedIntent, intentConfidence };
   }
 
   async getHistory(sessionId: string): Promise<ConciergeMessage[]> {
-    await this.getSession(sessionId); // ensure it exists
-    return this.messageRepo.find({
-      where: { sessionId },
-      order: { createdAt: 'ASC' },
-    });
+    await this.getSession(sessionId);
+    return this.messageRepo.find({ where: { sessionId }, order: { createdAt: 'ASC' } });
   }
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────
+  // ─── Reply generation ────────────────────────────────────────────────────
 
-  private buildReply(
+  private async generateReply(
+    sessionId: string,
+    userMessage: string,
+    intent: string | null,
+    context: Record<string, any>,
+  ): Promise<string> {
+    if (!this.llm.isConfigured) {
+      return this.fallbackReply(userMessage, intent, context);
+    }
+
+    try {
+      // Fetch recent history (last 20 messages) to pass as conversation context
+      const history = await this.messageRepo.find({
+        where: { sessionId },
+        order: { createdAt: 'ASC' },
+        take: 20,
+      });
+
+      const systemPrompt = this.buildSystemPrompt(context, intent);
+
+      const messages: ChatMessage[] = [
+        { role: 'system', content: systemPrompt },
+        ...history.map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        })),
+        { role: 'user', content: userMessage },
+      ];
+
+      return await this.llm.complete({ messages, maxTokens: 512, temperature: 0.7 });
+    } catch (err) {
+      this.logger.warn(
+        `LLM call failed for session ${sessionId}: ${(err as Error).message}. Using fallback.`,
+      );
+      return this.fallbackReply(userMessage, intent, context);
+    }
+  }
+
+  private buildSystemPrompt(context: Record<string, any>, intent: string | null): string {
+    const parts = [
+      'You are Genie, a helpful concierge assistant for a financial and social platform.',
+      'You help users with payments, wallets, orders, rides, and account queries.',
+      'Be concise, friendly, and professional.',
+    ];
+
+    if (context.topic) parts.push(`Current session topic: ${context.topic}.`);
+    if (intent && intent !== 'unknown') parts.push(`Detected user intent: ${intent}.`);
+    if (context.endUserId) parts.push(`You are assisting user: ${context.endUserId}.`);
+
+    return parts.join(' ');
+  }
+
+  private fallbackReply(
     userMessage: string,
     intent: string | null,
     context: Record<string, any>,
   ): string {
-    // Placeholder response strategy — replace with LLM call in production.
     if (!intent || intent === 'unknown') {
-      return `I'm your Genie concierge. I received your message and will assist you shortly. Context ID: ${context.sessionId}`;
+      return "I'm your Genie concierge. I've received your message and will assist you shortly. For immediate help, please contact support.";
     }
-    return `Understood — I detected your intent as "${intent}". I'm processing your request: "${userMessage.slice(0, 80)}${userMessage.length > 80 ? '…' : ''}". How can I assist you further?`;
+    return `I understand you're asking about "${intent}". I'm processing your request: "${userMessage.slice(0, 80)}${userMessage.length > 80 ? '…' : ''}". How can I assist you further?`;
   }
 }
