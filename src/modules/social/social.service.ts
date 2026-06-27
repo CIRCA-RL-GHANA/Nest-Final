@@ -220,6 +220,10 @@ export class SocialService {
       throw new NotFoundException('Chat session not found');
     }
 
+    if (session.participant1Id !== userId && session.participant2Id !== userId) {
+      throw new BadRequestException('Not a participant in this session');
+    }
+
     // Update unread messages
     await this.chatMessageRepository
       .createQueryBuilder()

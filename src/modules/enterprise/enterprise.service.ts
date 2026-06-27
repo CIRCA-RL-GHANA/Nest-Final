@@ -91,10 +91,27 @@ export class EnterpriseService {
   ): Promise<EnterpriseProfile> {
     const parent = await this.getProfile(parentEntityId);
     if (!parent.verified) throw new ForbiddenException('Parent enterprise must be verified before adding branches');
-    const branch = await this.register({ ...dto });
-    // Link to parent
-    await this.profileRepo.update(branch.id, { parentEnterpriseId: parent.id });
-    branch.parentEnterpriseId = parent.id;
+
+    const existing = await this.profileRepo.findOne({ where: { entityId: dto.entityId } });
+    if (existing) throw new ConflictException(`Enterprise profile already exists for entity ${dto.entityId}`);
+
+    // Atomically create branch with parent link in a single save — avoids orphaned
+    // branch if the subsequent update were to fail.
+    const branch = await this.profileRepo.save(
+      this.profileRepo.create({
+        entityId: dto.entityId,
+        enterpriseType: dto.enterpriseType,
+        legalName: dto.legalName ?? null,
+        taxId: dto.taxId ?? null,
+        licenceDocumentUrl: dto.licenceDocumentUrl ?? null,
+        webhookUrl: dto.webhookUrl ?? null,
+        enabledPathways: dto.enabledPathways ?? null,
+        settings: dto.settings ?? null,
+        status: EnterpriseStatus.PENDING,
+        parentEnterpriseId: parent.id,
+      }),
+    );
+    this.logger.log(`Branch ${branch.id} (entity: ${dto.entityId}) registered under parent ${parent.id}`);
     return branch;
   }
 

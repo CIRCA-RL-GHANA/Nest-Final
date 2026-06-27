@@ -19,6 +19,7 @@ import { FacilitatorAccount } from '../entities/facilitator-account.entity';
 import { PaymentFacilitatorService } from './payment-facilitator.service';
 import { FacilitatorBalanceService } from './facilitator-balance.service';
 import { FacilitatorProvider } from './payment-facilitator.service';
+import { MarketBalanceService } from './market-balance.service';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Return types
@@ -93,6 +94,7 @@ export class FacilitatorTransactionService {
     private readonly accountRepo: Repository<FacilitatorAccount>,
     private readonly facilitator: PaymentFacilitatorService,
     private readonly balanceCache: FacilitatorBalanceService,
+    private readonly marketBalance: MarketBalanceService,
     private readonly config: ConfigService,
   ) {
     this.DAILY_DEPOSIT_LIMIT = this.config.get<number>('payments.dailyDepositLimit') ?? 10_000;
@@ -440,16 +442,18 @@ export class FacilitatorTransactionService {
     secretHash: string,
   ): Promise<void> {
     const expectedHash = this.config.get<string>('payments.flutterwave.webhookHash');
-    if (expectedHash) {
-      const expected = Buffer.from(expectedHash);
-      const received = Buffer.from(secretHash);
-      if (
-        expected.length !== received.length ||
-        !crypto.timingSafeEqual(expected, received)
-      ) {
-        this.logger.warn('Flutterwave webhook: hash mismatch');
-        return;
-      }
+    if (!expectedHash) {
+      this.logger.warn('Flutterwave webhook: FLUTTERWAVE_WEBHOOK_HASH not configured — rejecting request');
+      return;
+    }
+    const expected = Buffer.from(expectedHash);
+    const received = Buffer.from(secretHash ?? '');
+    if (
+      expected.length !== received.length ||
+      !crypto.timingSafeEqual(expected, received)
+    ) {
+      this.logger.warn('Flutterwave webhook: hash mismatch — rejecting');
+      return;
     }
 
     const txRef = body.data?.tx_ref ?? String(body.data?.id ?? '');
@@ -478,8 +482,14 @@ export class FacilitatorTransactionService {
     secret?: string,
   ): Promise<void> {
     const expectedSecret = this.config.get<string>('payments.mtnMomo.webhookSecret');
-    if (expectedSecret && secret !== expectedSecret) {
-      this.logger.warn('MTN MoMo webhook: secret mismatch');
+    if (!expectedSecret) {
+      this.logger.warn('MTN MoMo webhook: MTN_MOMO_WEBHOOK_SECRET not configured — rejecting request');
+      return;
+    }
+    const expBuf = Buffer.from(expectedSecret);
+    const recBuf = Buffer.from(secret ?? '');
+    if (expBuf.length !== recBuf.length || !crypto.timingSafeEqual(expBuf, recBuf)) {
+      this.logger.warn('MTN MoMo webhook: secret mismatch — rejecting');
       return;
     }
 
@@ -633,13 +643,19 @@ export class FacilitatorTransactionService {
     });
     if (!tx || tx.status === FacilitatorTransactionStatus.COMPLETED) return;
 
+    // 1 USD = 1 QP (fixed peg: 1 QP = $1.00)
+    const qpAmount = amount;
+
     tx.status = FacilitatorTransactionStatus.COMPLETED;
     tx.completedAt = new Date();
     await this.txRepo.save(tx);
 
+    // Credit the user's Q-Point market balance (on-ramp: fiat → QP)
+    await this.marketBalance.adjustBalance(tx.userId, qpAmount, `deposit_${tx.id}`);
+
     await this.balanceCache.invalidateCache(tx.userId, tx.provider);
     this.logger.log(
-      `Deposit COMPLETED: txId=${tx.id} user=${tx.userId} amount=${amount} provider=${tx.provider}`,
+      `Deposit COMPLETED: txId=${tx.id} user=${tx.userId} amount=$${amount} qpCredited=${qpAmount} provider=${tx.provider}`,
     );
   }
 
@@ -649,13 +665,19 @@ export class FacilitatorTransactionService {
     });
     if (!tx || tx.status === FacilitatorTransactionStatus.COMPLETED) return;
 
+    // 1 QP = $1.00 — debit exactly the amount requested
+    const qpAmount = Number(tx.amount);
+
     tx.status = FacilitatorTransactionStatus.COMPLETED;
     tx.completedAt = new Date();
     await this.txRepo.save(tx);
 
+    // Debit the user's Q-Point market balance (off-ramp: QP → fiat)
+    await this.marketBalance.adjustBalance(tx.userId, -qpAmount, `withdrawal_${tx.id}`);
+
     await this.balanceCache.invalidateCache(tx.userId, tx.provider);
     this.logger.log(
-      `Withdrawal COMPLETED: txId=${tx.id} user=${tx.userId} provider=${tx.provider}`,
+      `Withdrawal COMPLETED: txId=${tx.id} user=${tx.userId} qpDebited=${qpAmount} provider=${tx.provider}`,
     );
   }
 

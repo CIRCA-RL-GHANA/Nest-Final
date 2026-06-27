@@ -82,6 +82,24 @@ export class MultiChannelService {
     return this.channelRepo.save(channel);
   }
 
+  async updateChannelStatus(channelId: string, status: string): Promise<MultiChannelConfig> {
+    const channel = await this.getChannel(channelId);
+    // Map generic status strings to the ChannelSyncStatus enum values
+    const validStatuses = Object.values(ChannelSyncStatus) as string[];
+    const syncStatus = validStatuses.includes(status)
+      ? (status as ChannelSyncStatus)
+      : ChannelSyncStatus.IDLE;
+    channel.syncStatus = syncStatus;
+    if (status === 'inactive') {
+      channel.isActive = false;
+    } else if (status === 'active') {
+      channel.isActive = true;
+      channel.syncStatus = ChannelSyncStatus.IDLE;
+    }
+    this.logger.log(`Channel ${channelId} status updated to ${status}`);
+    return this.channelRepo.save(channel);
+  }
+
   async deactivateChannel(channelId: string): Promise<void> {
     const channel = await this.getChannel(channelId);
     await this.channelRepo.update(channel.id, { isActive: false });

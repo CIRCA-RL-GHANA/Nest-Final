@@ -47,10 +47,9 @@ export class MarketBalanceService {
    */
   async adjustBalance(userId: string, delta: number, reason: string): Promise<number> {
     return this.dataSource.transaction(async (manager: EntityManager) => {
-      // Upsert with row-level lock to prevent race conditions
+      // INSERT ... ON CONFLICT DO NOTHING — ensures the row exists before the SELECT FOR UPDATE
       await manager
         .createQueryBuilder()
-        .setLock('pessimistic_write')
         .insert()
         .into(QPointMarketBalance)
         .values({ userId, balance: 0 })

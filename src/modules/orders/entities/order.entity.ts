@@ -97,4 +97,12 @@ export class Order extends BaseEntity {
   @ApiProperty({ description: 'Order metadata', type: 'object', required: false })
   @Column({ type: 'jsonb', nullable: true })
   metadata: Record<string, any> | null;
+
+  @ApiProperty({ description: 'Rating (1-5)', required: false })
+  @Column({ type: 'decimal', precision: 3, scale: 2, nullable: true })
+  rating: number | null;
+
+  @ApiProperty({ description: 'Written review', required: false })
+  @Column({ type: 'text', nullable: true })
+  review: string | null;
 }

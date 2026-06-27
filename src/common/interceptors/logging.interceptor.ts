@@ -5,7 +5,17 @@ import { tap } from 'rxjs/operators';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 // Paths whose request bodies must NEVER be logged (tokens, passwords, PINs).
-const SENSITIVE_PATHS = ['/auth/', '/users/set-pin', '/users/verify', '/users/check-phone'];
+const SENSITIVE_PATHS = [
+  '/auth/',
+  '/users/set-pin',
+  '/users/verify',
+  '/users/check-phone',
+  '/payments/',
+  '/wallets/',
+  '/loans/',
+  '/deposits/',
+  '/qpoints/',
+];
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {

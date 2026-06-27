@@ -15,9 +15,11 @@ import {
   BadRequestException,
   ParseIntPipe,
   DefaultValuePipe,
+  Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Request } from 'express';
+import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -64,6 +66,8 @@ function clientUserAgent(req: Request): string {
 @UseGuards(JwtAuthGuard, QPointsTosGuard)
 @Controller('qpoints')
 export class QPointsMarketController {
+  private readonly logger = new Logger(QPointsMarketController.name);
+
   constructor(
     private readonly config: ConfigService,
     private readonly orderBook: OrderBookService,
@@ -259,10 +263,11 @@ export class QPointsMarketController {
   @ApiOperation({
     summary: '[Admin] Get Q Points trading suspension status (Section 6.2)',
   })
-  getTradingStatus() {
+  async getTradingStatus() {
+    const suspended = await this.orderBook.isTradingSuspended();
     return {
-      suspended: this.orderBook.isTradingSuspended(),
-      message: this.orderBook.isTradingSuspended()
+      suspended,
+      message: suspended
         ? 'Q Points trading is currently SUSPENDED. Users cannot place or execute orders.'
         : 'Q Points trading is ACTIVE.',
     };
@@ -279,8 +284,8 @@ export class QPointsMarketController {
       'Immediately prevents all order placement. Users will receive a ServiceUnavailableException. ' +
       'Per Terms Section 6.2: the Company may suspend trading at any time without prior notice.',
   })
-  suspendTrading() {
-    this.orderBook.suspendTrading();
+  async suspendTrading() {
+    await this.orderBook.suspendTrading();
     return { suspended: true, message: 'Q Points trading has been suspended per Section 6.2.' };
   }
 
@@ -293,8 +298,8 @@ export class QPointsMarketController {
     summary: '[Admin] Resume Q Points trading (Section 6.2)',
     description: 'Lifts a previous suspension and allows order placement again.',
   })
-  resumeTrading() {
-    this.orderBook.resumeTrading();
+  async resumeTrading() {
+    await this.orderBook.resumeTrading();
     return { suspended: false, message: 'Q Points trading has been resumed.' };
   }
 
@@ -486,9 +491,15 @@ export class QPointsMarketController {
     @Body() body: { userId?: string; provider?: string },
     @Req() req: Request,
   ) {
-    const expectedSecret = req.headers['x-webhook-secret'] as string | undefined;
+    const receivedSecret = req.headers['x-webhook-secret'] as string | undefined;
     const configuredSecret = this.config?.get<string>('payments.webhookSecret');
-    if (!configuredSecret || expectedSecret !== configuredSecret) {
+    let secretValid = false;
+    if (configuredSecret && receivedSecret) {
+      const expBuf = Buffer.from(configuredSecret);
+      const recBuf = Buffer.from(receivedSecret);
+      secretValid = expBuf.length === recBuf.length && crypto.timingSafeEqual(expBuf, recBuf);
+    }
+    if (!secretValid) {
       // Silently acknowledge — do NOT reveal whether the secret matched
       return { received: true };
     }
@@ -595,8 +606,8 @@ export class QPointsMarketController {
       'book only if the admin separately authorizes a wind-down period.',
   })
   @ApiResponse({ status: 200, description: 'User Q Points access terminated' })
-  terminateUserAccess(@Param('userId', ParseUUIDPipe) userId: string) {
-    this.orderBook.terminateUser(userId);
+  async terminateUserAccess(@Param('userId', ParseUUIDPipe) userId: string) {
+    await this.orderBook.terminateUser(userId);
     return {
       success: true,
       userId,
@@ -622,8 +633,8 @@ export class QPointsMarketController {
       'Also lifts any fiat-failure suspension (Section 4.3).',
   })
   @ApiResponse({ status: 200, description: 'User Q Points access reinstated' })
-  reinstateUserAccess(@Param('userId', ParseUUIDPipe) userId: string) {
-    this.orderBook.reinstateUser(userId);
+  async reinstateUserAccess(@Param('userId', ParseUUIDPipe) userId: string) {
+    await this.orderBook.reinstateUser(userId);
     return { success: true, userId, message: `User ${userId} Q Points trading access reinstated.` };
   }
 
@@ -638,15 +649,17 @@ export class QPointsMarketController {
     summary: "[Admin] Get a user's Q Points trading restriction status (Sections 4.3, 12.2)",
   })
   @ApiResponse({ status: 200, description: 'User trading restriction status' })
-  getUserTradingStatus(@Param('userId', ParseUUIDPipe) userId: string) {
+  async getUserTradingStatus(@Param('userId', ParseUUIDPipe) userId: string) {
+    const [terminated, fiatSuspended, tradingSuspended] = await Promise.all([
+      this.orderBook.isUserTerminated(userId),
+      this.orderBook.isUserFiatSuspended(userId),
+      this.orderBook.isTradingSuspended(),
+    ]);
     return {
       userId,
-      terminated: this.orderBook.isUserTerminated(userId),
-      fiatSuspended: this.orderBook.isUserFiatSuspended(userId),
-      canTrade:
-        !this.orderBook.isUserTerminated(userId) &&
-        !this.orderBook.isUserFiatSuspended(userId) &&
-        !this.orderBook.isTradingSuspended(),
+      terminated,
+      fiatSuspended,
+      canTrade: !terminated && !fiatSuspended && !tradingSuspended,
     };
   }
 
@@ -684,8 +697,25 @@ export class QPointsMarketController {
   @ApiResponse({ status: 400, description: 'Missing required fields' })
   async facilitatorSettlementWebhook(
     @Body() body: { reference: string; facilitatorRef: string; status?: string },
-    @Req() _req: Request,
+    @Req() req: Request,
   ) {
+    // ISSUE-09: HMAC-SHA256 verification — reject unsigned requests
+    const webhookSecret = this.config?.get<string>('payments.webhookSecret');
+    if (!webhookSecret) {
+      throw new BadRequestException('Settlement webhook not configured');
+    }
+    const signature = req.headers['x-webhook-signature'] as string | undefined;
+    if (!signature) {
+      throw new BadRequestException('Missing X-Webhook-Signature header');
+    }
+    const rawBody = JSON.stringify(body);
+    const expected = crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
+    const expectedBuf = Buffer.from(expected);
+    const receivedBuf = Buffer.from(signature);
+    if (expectedBuf.length !== receivedBuf.length || !crypto.timingSafeEqual(expectedBuf, receivedBuf)) {
+      throw new BadRequestException('Invalid webhook signature');
+    }
+
     if (!body.reference || !body.facilitatorRef) {
       throw new BadRequestException('reference and facilitatorRef are required');
     }
@@ -708,8 +738,8 @@ export class QPointsMarketController {
   @ApiOperation({
     summary: '[Admin] Suspend a user for fiat settlement failure (Section 4.3)',
   })
-  suspendUserFiat(@Param('userId', ParseUUIDPipe) targetUserId: string) {
-    this.orderBook.suspendUserForFiatFailure(targetUserId);
+  async suspendUserFiat(@Param('userId', ParseUUIDPipe) targetUserId: string) {
+    await this.orderBook.suspendUserForFiatFailure(targetUserId);
     return {
       success: true,
       userId: targetUserId,
@@ -1060,5 +1090,52 @@ export class QPointsMarketController {
   async mpesaWebhook(@Req() req: any) {
     await this.facilitatorTx.handleMpesaWebhook(req.body);
     return { received: true };
+  }
+
+  // ---------------------------------------------------------------------- settlement initiate
+
+  @Post('settlement/initiate')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Initiate a Q Points settlement transfer between two entity accounts',
+  })
+  async initiateSettlement(
+    @Body() body: { fromEntityId: string; toEntityId: string; amount: number; reference?: string },
+    @Req() req: Request,
+  ) {
+    const uid = userId(req);
+    const ref = body.reference ?? `SETTLE-${uid}-${Date.now()}`;
+    // Debit the source account, credit the destination account
+    await this.balance.adjustBalance(body.fromEntityId, -body.amount, ref);
+    await this.balance.adjustBalance(body.toEntityId, body.amount, ref);
+    this.logger.log(`Settlement initiated by ${uid}: ${body.fromEntityId} → ${body.toEntityId} amount=${body.amount} ref=${ref}`);
+    return { success: true, reference: ref, fromEntityId: body.fromEntityId, toEntityId: body.toEntityId, amount: body.amount };
+  }
+
+  // ---------------------------------------------------------------------- facilitator institution balance & issue
+
+  @Get('facilitator/institutions/:entityId/balance')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.FINANCIAL_INSTITUTION, UserRole.FI_AUDITOR)
+  @ApiOperation({ summary: '[FI] Get Q Points balance for an institution entity account' })
+  async getInstitutionBalance(@Param('entityId', ParseUUIDPipe) entityId: string) {
+    return this.balance.getBalance(entityId);
+  }
+
+  @Post('facilitator/institutions/issue')
+  @SkipTosCheck()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.FINANCIAL_INSTITUTION)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: '[FI] Issue (credit) Q Points to an institution entity account' })
+  async issueQp(
+    @Body() body: { entityId: string; amount: number; reason?: string },
+    @Req() req: Request,
+  ) {
+    const uid = userId(req);
+    const ref = `ISSUE-${body.entityId}-${Date.now()}`;
+    const newBalance = await this.balance.adjustBalance(body.entityId, body.amount, ref);
+    return { success: true, entityId: body.entityId, amount: body.amount, newBalance, reason: body.reason ?? null };
   }
 }

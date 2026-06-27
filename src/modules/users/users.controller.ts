@@ -49,6 +49,7 @@ export class UsersController {
   @Post('verify-otp')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @ApiOperation({ summary: 'Verify OTP code' })
   @ApiResponse({
     status: 200,
@@ -178,6 +179,7 @@ export class UsersController {
   @Post('resend-otp')
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @ApiOperation({ summary: 'Resend OTP to phone number' })
   @ApiBody({
     schema: {

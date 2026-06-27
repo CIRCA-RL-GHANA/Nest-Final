@@ -1,11 +1,12 @@
-import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { OrdersService } from './orders.service';
+
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { CreateReturnRequestDto } from './dto/create-return-request.dto';
@@ -54,12 +55,17 @@ export class OrdersController {
     return this.ordersService.createOrder(buyerId, dto);
   }
 
-  @Get(':id')
-  @Roles(...ORDER_READ_ROLES)
-  @ApiOperation({ summary: 'Get order by ID' })
-  @ApiResponse({ status: 200, description: 'Order found', type: Order })
-  async getOrder(@Param('id') id: string): Promise<Order> {
-    return this.ordersService.getOrder(id);
+  // ─── Static-prefix routes (must appear before any :id param routes) ────────
+
+  @Get('user/me')
+  @Roles(UserRole.USER, ...ORDER_READ_ROLES)
+  @ApiOperation({ summary: "Get current user's own orders" })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getMyOrders(
+    @CurrentUser() user: User,
+    @Query('limit') limit?: number,
+  ): Promise<Order[]> {
+    return this.ordersService.getUserOrders(user.id, limit);
   }
 
   @Get('user/me')
@@ -81,9 +87,52 @@ export class OrdersController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   async getUserOrders(
     @Param('userId') userId: string,
+    @CurrentUser() currentUser: User,
     @Query('limit') limit?: number,
   ): Promise<Order[]> {
+    // ISSUE-K: regular users may only view their own orders; elevated roles can view any.
+    if (currentUser.role === UserRole.USER && currentUser.id !== userId) {
+      throw new ForbiddenException('You can only view your own orders');
+    }
     return this.ordersService.getUserOrders(userId, limit);
+  }
+
+  @Get('returns')
+  @Roles(UserRole.USER, ...ORDER_READ_ROLES)
+  @ApiOperation({ summary: "Get current user's return requests" })
+  @ApiResponse({ status: 200, description: 'Return requests retrieved', type: [ReturnRequest] })
+  async getMyReturns(@CurrentUser() user: User): Promise<ReturnRequest[]> {
+    return this.ordersService.getReturnRequests(user.id);
+  }
+
+  // ─── Parametric :id routes ────────────────────────────────────────────────
+
+  @Get(':id')
+  @Roles(...ORDER_READ_ROLES)
+  @ApiOperation({ summary: 'Get order by ID' })
+  @ApiResponse({ status: 200, description: 'Order found', type: Order })
+  async getOrder(@Param('id') id: string): Promise<Order> {
+    return this.ordersService.getOrder(id);
+  }
+
+  @Get(':id/delivery')
+  @Roles(UserRole.USER, ...ORDER_READ_ROLES)
+  @ApiOperation({ summary: 'Get delivery tracking info for an order' })
+  @ApiResponse({ status: 200, description: 'Delivery record', type: Delivery })
+  async getOrderDelivery(@Param('id') id: string): Promise<Delivery | null> {
+    return this.ordersService.getOrderDelivery(id);
+  }
+
+  @Post(':id/rate')
+  @Roles(UserRole.USER, ...ORDER_MANAGE_ROLES)
+  @ApiOperation({ summary: 'Rate a completed order' })
+  @ApiResponse({ status: 200, description: 'Order rated', type: Order })
+  async rateOrder(
+    @Param('id') id: string,
+    @Body() body: { rating: number; review?: string },
+    @CurrentUser() user: User,
+  ): Promise<Order> {
+    return this.ordersService.rateOrder(id, body.rating, body.review, user.id);
   }
 
   @Get(':id/items')

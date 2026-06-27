@@ -6,18 +6,51 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { WebhookSubscription } from './entities/webhook-subscription.entity';
 import { CreateWebhookSubscriptionDto, SUPPORTED_EVENTS } from './dto/webhook.dto';
 
+const RETRY_DELAYS_MS = [5_000, 30_000, 300_000]; // 5 s, 30 s, 5 min
+
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
+  private readonly encKey: Buffer;
 
   constructor(
     @InjectRepository(WebhookSubscription)
     private readonly subRepo: Repository<WebhookSubscription>,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    const raw = this.configService.get<string>('PIN_ENCRYPTION_KEY') ?? '';
+    // Derive a 32-byte AES key from whatever is configured
+    this.encKey = crypto.createHash('sha256').update(raw).digest();
+  }
+
+  // ─── AES-256-GCM helpers ─────────────────────────────────────────────────
+
+  private encrypt(plaintext: string): string {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', this.encKey, iv);
+    const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `${iv.toString('hex')}:${tag.toString('hex')}:${enc.toString('hex')}`;
+  }
+
+  private decrypt(ciphertext: string): string {
+    const parts = ciphertext.split(':');
+    if (parts.length !== 3) {
+      throw new BadRequestException('Malformed encrypted secret — expected iv:tag:enc');
+    }
+    const [ivHex, tagHex, encHex] = parts;
+    const iv = Buffer.from(ivHex, 'hex');
+    const tag = Buffer.from(tagHex, 'hex');
+    const enc = Buffer.from(encHex, 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', this.encKey, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
+  }
 
   // ─── Subscribe ────────────────────────────────────────────────────────────
 
@@ -33,15 +66,17 @@ export class WebhooksService {
       throw new BadRequestException(`Unsupported event types: ${invalid.join(', ')}`);
     }
 
-    // Generate a signing secret — returned once; stored hashed
+    // Generate a signing secret — returned once; stored encrypted + hashed
     const rawSecret = `whsec_${crypto.randomBytes(32).toString('hex')}`;
     const secretHash = crypto.createHash('sha256').update(rawSecret).digest('hex');
+    const secretEncrypted = this.encrypt(rawSecret);
     const secretPrefix = rawSecret.slice(0, 8);
 
     const sub = this.subRepo.create({
       entityId: dto.entityId,
       url: dto.url,
       secretHash,
+      secretEncrypted,
       secretPrefix,
       events: dto.events,
       isActive: true,
@@ -98,12 +133,12 @@ export class WebhooksService {
     };
     const payloadStr = JSON.stringify(payload);
 
-    for (const sub of matchingSubs) {
-      await this.deliverToSubscription(sub, payloadStr);
-    }
+    await Promise.allSettled(
+      matchingSubs.map((sub) => this.deliverToSubscription(sub, payloadStr)),
+    );
   }
 
-  // ─── Private: single delivery with HMAC-SHA256 signature ─────────────────
+  // ─── Private: single delivery with HMAC-SHA256 signature + retry ─────────
 
   private async deliverToSubscription(
     sub: WebhookSubscription,
@@ -112,10 +147,22 @@ export class WebhooksService {
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const signedPayload = `${timestamp}.${payloadStr}`;
 
-    // We stored hash of the secret — regeneration not possible, so we use secretHash as key
-    // In production store the raw secret encrypted; here we derive a delivery MAC using the stored hash
+    // Use the decrypted raw secret for standard HMAC-SHA256 (Stripe-style).
+    // Fall back to secretHash for legacy subscriptions created before encryption was added.
+    let signingKey: string;
+    if (sub.secretEncrypted) {
+      try {
+        signingKey = this.decrypt(sub.secretEncrypted);
+      } catch {
+        this.logger.warn(`Could not decrypt secret for subscription ${sub.id}, using hash fallback`);
+        signingKey = sub.secretHash;
+      }
+    } else {
+      signingKey = sub.secretHash;
+    }
+
     const signature = crypto
-      .createHmac('sha256', sub.secretHash)
+      .createHmac('sha256', signingKey)
       .update(signedPayload)
       .digest('hex');
 
@@ -125,31 +172,46 @@ export class WebhooksService {
       'X-Genie-Event': (JSON.parse(payloadStr) as any).type,
     };
 
-    try {
-      // Use native fetch (Node 18+)
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(sub.url, {
-        method: 'POST',
-        headers,
-        body: payloadStr,
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      if (res.ok) {
-        await this.subRepo.update(sub.id, {
-          deliveryCount: sub.deliveryCount + 1,
-          failureCount: 0,
-          lastDeliveredAt: new Date(),
+    // Retry up to RETRY_DELAYS_MS.length times on transient failure
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(sub.url, {
+          method: 'POST',
+          headers,
+          body: payloadStr,
+          signal: controller.signal,
         });
-      } else {
-        await this.subRepo.update(sub.id, { failureCount: sub.failureCount + 1 });
-        this.logger.warn(`Webhook ${sub.id} returned ${res.status} for ${sub.url}`);
+        clearTimeout(timeout);
+
+        if (res.ok) {
+          await this.subRepo.update(sub.id, {
+            deliveryCount: sub.deliveryCount + 1,
+            failureCount: 0,
+            lastDeliveredAt: new Date(),
+          });
+          return;
+        }
+
+        this.logger.warn(
+          `Webhook ${sub.id} returned HTTP ${res.status} (attempt ${attempt + 1})`,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Webhook ${sub.id} network error (attempt ${attempt + 1}): ${err.message}`,
+        );
       }
-    } catch (err) {
-      await this.subRepo.update(sub.id, { failureCount: sub.failureCount + 1 });
-      this.logger.error(`Webhook delivery failed for ${sub.id}: ${err.message}`);
+
+      if (attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      }
     }
+
+    // All attempts exhausted
+    await this.subRepo.update(sub.id, { failureCount: sub.failureCount + 1 });
+    this.logger.error(
+      `Webhook ${sub.id} failed all ${RETRY_DELAYS_MS.length + 1} delivery attempts for ${sub.url}`,
+    );
   }
 }

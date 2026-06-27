@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
 import { AiFacilitatorBalance } from '../entities/ai-facilitator-balance.entity';
 import { NettingTask, NettingTaskStatus } from '../entities/netting-task.entity';
@@ -48,6 +48,7 @@ export class NettingEngineService {
     @InjectRepository(NettingTask)
     private readonly nettingTaskRepo: Repository<NettingTask>,
     private readonly crossFacilitatorEngine: CrossFacilitatorEngineService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // =========================================================================
@@ -65,11 +66,22 @@ export class NettingEngineService {
    */
   @Cron('0 * * * *') // Every hour at minute 0
   async runNetting(): Promise<void> {
+    // ISSUE-T: use PostgreSQL advisory lock so only one replica runs netting at a time.
+    // Lock ID is a stable hash of the service name; released in the finally block.
+    const [lockRow] = await this.dataSource.query<[{ acquired: boolean }]>(
+      `SELECT pg_try_advisory_lock(hashtext('netting-engine')) AS acquired`,
+    );
+    if (!lockRow.acquired) {
+      this.logger.debug('NettingEngine: advisory lock not acquired — another instance is running');
+      return;
+    }
     try {
       await this._runNettingInternal();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`NettingEngine run failed: ${msg}`);
+    } finally {
+      await this.dataSource.query(`SELECT pg_advisory_unlock(hashtext('netting-engine'))`);
     }
   }
 
@@ -206,9 +218,9 @@ export class NettingEngineService {
     notes?: string,
   ): Promise<NettingTask> {
     const task = await this.nettingTaskRepo.findOne({ where: { id: taskId } });
-    if (!task) throw new Error(`NettingTask ${taskId} not found`);
+    if (!task) throw new NotFoundException(`NettingTask ${taskId} not found`);
     if (task.status !== NettingTaskStatus.PENDING && task.status !== NettingTaskStatus.IN_PROGRESS) {
-      throw new Error(`NettingTask ${taskId} is already ${task.status}`);
+      throw new BadRequestException(`NettingTask ${taskId} is already ${task.status}`);
     }
 
     // Apply the balance adjustments to the AI facilitator balance rows
@@ -239,9 +251,9 @@ export class NettingEngineService {
   /** Cancel a pending netting task (e.g., if circumstances changed). */
   async cancelNettingTask(taskId: string, adminUserId: string, notes?: string): Promise<NettingTask> {
     const task = await this.nettingTaskRepo.findOne({ where: { id: taskId } });
-    if (!task) throw new Error(`NettingTask ${taskId} not found`);
+    if (!task) throw new NotFoundException(`NettingTask ${taskId} not found`);
     if (task.status !== NettingTaskStatus.PENDING) {
-      throw new Error(`NettingTask ${taskId} cannot be cancelled — status is ${task.status}`);
+      throw new BadRequestException(`NettingTask ${taskId} cannot be cancelled — status is ${task.status}`);
     }
 
     await this.nettingTaskRepo.update({ id: taskId }, {

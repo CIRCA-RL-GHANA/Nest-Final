@@ -2,6 +2,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import * as bcrypt from 'bcrypt';
 import { BaseEntity } from '@/common/entities/base.entity';
+// DB migration required: add columns role, is_active, is_qp_terminated, is_fiat_suspended
 
 export enum UserRole {
   ADMIN = 'admin',
@@ -99,6 +100,18 @@ export class User extends BaseEntity {
   })
   @Column({ type: 'timestamp with time zone', default: () => 'CURRENT_TIMESTAMP' })
   registrationTimestamp: Date;
+
+  @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
+  role: UserRole;
+
+  @Column({ type: 'boolean', default: true })
+  isActive: boolean;
+
+  @Column({ type: 'boolean', default: false, name: 'is_qp_terminated' })
+  isQpTerminated: boolean;
+
+  @Column({ type: 'boolean', default: false, name: 'is_fiat_suspended' })
+  isFiatSuspended: boolean;
 
   @BeforeInsert()
   async hashPassword() {

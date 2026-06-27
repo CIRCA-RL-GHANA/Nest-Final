@@ -7,7 +7,9 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, DataSource } from 'typeorm';
+import * as crypto from 'crypto';
+import { ConfigService } from '@nestjs/config';
 import { DigitalAsset, DigitalAssetStatus, DigitalAssetType, AccessModel } from './entities/digital-asset.entity';
 import { EplayLicense, LicenseStatus } from './entities/eplay-license.entity';
 import { CreatorProfile } from './entities/creator-profile.entity';
@@ -32,6 +34,8 @@ export class EplayService {
     @InjectRepository(RevenueRecord)
     private readonly revenueRepo: Repository<RevenueRecord>,
     private readonly walletsService: WalletsService,
+    private readonly configService: ConfigService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // ── Creator Profile ──────────────────────────────────────────────────────
@@ -115,10 +119,24 @@ export class EplayService {
   async purchaseAsset(userId: string, dto: PurchaseAssetDto): Promise<EplayLicense> {
     const asset = await this.getAssetById(dto.digitalAssetId);
 
-    // Idempotency: check if active license already exists
-    const existing = await this.licenseRepo.findOne({
-      where: { userId, digitalAssetId: asset.id, status: LicenseStatus.ACTIVE },
-    });
+    // ISSUE-26: pessimistic lock prevents two concurrent requests from both passing
+    // the license-existence check and creating duplicate licenses.
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+    let existing: EplayLicense | null;
+    try {
+      existing = await qr.manager.findOne(EplayLicense, {
+        where: { userId, digitalAssetId: asset.id, status: LicenseStatus.ACTIVE },
+        lock: { mode: 'pessimistic_write' },
+      });
+      await qr.commitTransaction();
+    } catch (err) {
+      await qr.rollbackTransaction();
+      throw err;
+    } finally {
+      await qr.release();
+    }
     if (existing) {
       throw new ConflictException('You already have an active license for this content.');
     }
@@ -214,11 +232,15 @@ export class EplayService {
     await this.licenseRepo.update(license.id, { lastAccessedAt: new Date() });
     await this.assetRepo.increment({ id: assetId }, 'playCount', 1);
 
-    // Issue a short-lived signed streaming token (the real CDN signing happens at infra level)
+    // ISSUE-10: HMAC-SHA256 signed streaming token — plain base64 is unforgeable only if signed
     const tokenExpiry = new Date(Date.now() + 4 * 60 * 60 * 1000); // 4 hours
-    const streamToken = Buffer.from(
-      JSON.stringify({ userId, assetId, exp: tokenExpiry.toISOString() }),
-    ).toString('base64url');
+    const streamSecret = this.configService.get<string>('eplay.streamSecret')
+      ?? this.configService.get<string>('jwt.secret')
+      ?? '';
+    const payload = JSON.stringify({ userId, assetId, exp: tokenExpiry.toISOString() });
+    const payloadB64 = Buffer.from(payload).toString('base64url');
+    const sig = crypto.createHmac('sha256', streamSecret).update(payloadB64).digest('hex');
+    const streamToken = `${payloadB64}.${sig}`;
 
     return { streamToken, expiresAt: tokenExpiry };
   }

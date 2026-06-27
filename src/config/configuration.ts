@@ -89,7 +89,7 @@ export const configuration = () => ({
 
   // CORS
   cors: {
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: process.env.CORS_ORIGIN || '',
     credentials: process.env.CORS_CREDENTIALS === 'true',
   },
 

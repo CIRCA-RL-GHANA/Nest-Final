@@ -20,6 +20,7 @@ export enum SettlementStatus {
   PENDING = 'pending',
   COMPLETED = 'completed',
   FAILED = 'failed',
+  EXPIRED = 'expired',
 }
 
 @Entity('q_point_settlements')

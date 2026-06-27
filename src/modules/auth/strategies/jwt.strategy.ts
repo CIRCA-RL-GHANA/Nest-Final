@@ -4,7 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from '../../users/entities/user.entity';
+import { User, UserRole } from '../../users/entities/user.entity';
 import { TokenBlacklistService } from '../token-blacklist.service';
 
 export interface JwtPayload {
@@ -13,6 +13,7 @@ export interface JwtPayload {
   phoneNumber: string;
   socialUsername: string | null;
   wireId: string | null;
+  role: UserRole;
   iat?: number;
   exp?: number;
 }
@@ -42,7 +43,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     const user = await this.userRepository.findOne({
-      where: { id: payload.sub },
+      where: { id: payload.sub, isActive: true },
     });
 
     if (!user) {
