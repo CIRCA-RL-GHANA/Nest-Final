@@ -1133,7 +1133,7 @@ export class QPointsMarketController {
     @Body() body: { entityId: string; amount: number; reason?: string },
     @Req() req: Request,
   ) {
-    const uid = userId(req);
+    const _uid = userId(req);
     const ref = `ISSUE-${body.entityId}-${Date.now()}`;
     const newBalance = await this.balance.adjustBalance(body.entityId, body.amount, ref);
     return { success: true, entityId: body.entityId, amount: body.amount, newBalance, reason: body.reason ?? null };

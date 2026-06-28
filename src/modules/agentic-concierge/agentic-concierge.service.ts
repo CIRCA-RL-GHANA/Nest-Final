@@ -199,7 +199,7 @@ export class AgenticConciergeService {
   private fallbackReply(
     userMessage: string,
     intent: string | null,
-    context: Record<string, any>,
+    _context: Record<string, any>,
   ): string {
     if (!intent || intent === 'unknown') {
       return "I'm your Genie concierge. I've received your message and will assist you shortly. For immediate help, please contact support.";
