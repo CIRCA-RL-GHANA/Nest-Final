@@ -228,6 +228,7 @@ export class AuthService {
       phoneNumber: user.phoneNumber,
       socialUsername: user.socialUsername,
       wireId: user.wireId,
+      role: user.role,
     };
 
     const expiresIn = this.configService.get<string>('jwt.expiresIn') || '7d';

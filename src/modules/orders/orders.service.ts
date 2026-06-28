@@ -186,6 +186,22 @@ export class OrdersService {
     });
   }
 
+  async getOrderDelivery(orderId: string): Promise<Delivery | null> {
+    return this.deliveryRepository.findOne({ where: { orderId } });
+  }
+
+  async rateOrder(orderId: string, rating: number, review: string | undefined, userId: string): Promise<Order> {
+    const order = await this.getOrder(orderId);
+    if (order.buyerId !== userId) {
+      throw new BadRequestException('You can only rate your own orders');
+    }
+    if (order.status !== OrderStatus.DELIVERED) {
+      throw new BadRequestException('Order must be delivered before rating');
+    }
+    await this.orderRepository.update(orderId, { rating, review: review ?? null });
+    return this.getOrder(orderId);
+  }
+
   async startFulfillment(orderId: string, fulfillerId: string): Promise<FulfillmentSession> {
     const order = await this.getOrder(orderId);
 

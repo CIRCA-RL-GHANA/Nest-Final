@@ -68,18 +68,6 @@ export class OrdersController {
     return this.ordersService.getUserOrders(user.id, limit);
   }
 
-  @Get('user/me')
-  @Roles(...ORDER_READ_ROLES)
-  @ApiOperation({ summary: 'Get orders for the authenticated user' })
-  @ApiResponse({ status: 200, description: 'Orders retrieved', type: [Order] })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  async getMyOrders(
-    @CurrentUser('id') userId: string,
-    @Query('limit') limit?: number,
-  ): Promise<Order[]> {
-    return this.ordersService.getUserOrders(userId, limit);
-  }
-
   @Get('user/:userId')
   @Roles(...ORDER_READ_ROLES)
   @ApiOperation({ summary: 'Get orders for a specific user (admin/enterprise)' })
